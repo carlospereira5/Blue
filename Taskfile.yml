@@ -1,0 +1,62 @@
+version: '3'
+
+tasks:
+  blue:
+    desc: "Ejecuta todos los tests (comando principal)"
+    cmds:
+      - go test ./... -v -count=1
+    dir: "{{.ROOT_DIR}}"
+
+  test:
+    desc: "Alias de blue - ejecuta todos los tests"
+    cmds:
+      - task: blue
+
+  test:short:
+    desc: "Tests sin output verbose"
+    cmds:
+      - go test ./... -count=1
+
+  dev:
+    desc: "Corre el servidor en modo desarrollo"
+    cmds:
+      - go run ./cmd/server/main.go
+
+  build:
+    desc: "Compila el binario"
+    cmds:
+      - go build -o bin/blue ./cmd/server/main.go
+    generates:
+      - bin/blue
+
+  lint:
+    desc: "Lint con go vet"
+    cmds:
+      - go vet ./...
+
+  tidy:
+    desc: "Actualiza dependencias"
+    cmds:
+      - go mod tidy
+
+  db:up:
+    desc: "Levanta PostgreSQL en Docker"
+    cmds:
+      - docker compose up -d postgres
+
+  db:down:
+    desc: "Detiene PostgreSQL"
+    cmds:
+      - docker compose down
+
+  db:reset:
+    desc: "Resetea la DB completa (destruye datos)"
+    cmds:
+      - docker compose down -v
+      - docker compose up -d postgres
+      - sleep 3
+
+  db:psql:
+    desc: "Abre psql contra la DB local"
+    cmds:
+      - docker compose exec postgres psql -U kiosko -d blue
