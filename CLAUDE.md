@@ -12,7 +12,7 @@ Blue is a Go backend that complements Loyverse POS. It consumes Loyverse API dat
 
 1. **Accounting/Inventory/POS are siloed** → Blue unifies them under one program using Transaction as the single unifying event.
 2. **Raw POS data with manual processes** → Blue automates everything by consuming Loyverse API and running its own business logic.
-3. **Adoption friction** → Web dashboard (metrics-only) + WhatsApp chatbot (natural language interface) so no one has to "learn new software".
+3. **Adoption friction** → WhatsApp chatbot (natural language interface via Gemini) so no one has to "learn new software".
 
 ### Core Concepts
 
@@ -27,73 +27,50 @@ Inventory(t) = initial_inventory + purchases - sales
 Cash(t)      = initial_cash + sales - expenses - debt_payments
 ```
 
-This model enables automated dual-ledger updates from a single event and full temporal analysis.
+## Development Strategy
 
-## Architecture
+**Chatbot-first approach.** Instead of building persistence layers, sync services, and HTTP APIs upfront, we start with a working WhatsApp chatbot that queries Loyverse directly. This validates the core use cases immediately and avoids premature complexity.
 
-Clean Architecture, strict layer boundaries:
+### Phases
+
+| Phase | Goal | Persistence |
+|-------|------|-------------|
+| **Phase 1** (current) | Loyverse client + Gemini + WhatsApp = working chatbot | None — direct API queries |
+| **Phase 2** | Add inventory module (FIFO costing) + accounting module (caja, deudas) | PostgreSQL |
+| **Phase 3** | Web dashboard for metrics visualization | PostgreSQL |
+
+## Architecture (Phase 1 — Chatbot Branch)
 
 ```
-cmd/server/          → Entry point (no business logic here)
+cmd/bot/              → Entry point: WhatsApp bot + Gemini agent
 internal/
-  config/            → Config from .env (godotenv)
-  loyverse/          → Loyverse API client + domain types
-  service/           → Business logic (planned: accounting, inventory, metrics)
-  repository/        → DB access (planned: PostgreSQL)
-  api/               → HTTP handlers + router (planned: Gin)
-docs/                → Architecture docs, session checkpoints
+  config/             → Config from .env (godotenv)
+  loyverse/           → Loyverse API client + domain types
+  agent/              → Gemini integration + tool definitions
+  whatsapp/           → whatsmeow wrapper
+docs/                 → API reference, session checkpoints
 ```
 
-## Database Schema
+## Environment
 
-Full schema in `docs/schema.md`. Key design decisions:
-
-**Two categories of tables:**
-- `lv_*` tables — mirror of Loyverse data, controlled by the sync service, never edited manually
-- Blue domain tables — own business data (suppliers, inventory lots, debts, journal entries)
-
-**Loyverse mirror tables (`lv_` prefix):**
-```
-lv_categories, lv_items, lv_variations, lv_employees
-lv_receipts, lv_receipt_line_items, lv_receipt_payments
-lv_shifts, sync_state
-```
-
-**Blue domain tables:**
-```
-suppliers, supplier_products
-inventory_lots, inventory_movements
-purchase_orders, purchase_order_items
-debts, debt_payments
-journal_entries
-```
-
-**DB conventions (non-negotiable):**
-- `NUMERIC(12,2)` for all money — never FLOAT (floating-point representation errors)
-- `TIMESTAMPTZ` for all timestamps — business runs at UTC-3, store with timezone
-- Loyverse IDs as `TEXT PRIMARY KEY` in mirror tables — no extra mapping layer
-- `inventory_lots.quantity_remaining` — maintained for O(1) FIFO queries
-- `debts.amount_remaining` — maintained for O(1) current state without SUM
-
-## WhatsApp Bot (whatsmeow)
-
-The WhatsApp interface uses **whatsmeow** (https://github.com/tulir/whatsmeow), a Go library for WhatsApp Web.
-
-- Open source, zero API cost — connects via WhatsApp Web protocol
-- Requires linking a real phone number once
-- **v1.0 scope**: simple command bot — ventas del día, stock actual, deudas pendientes
-- **v2 scope**: Gemini integration for natural language + MCP for actions (create POs, register payments)
-
-No external services required for v1 — just a phone number and the Go library.
+- **OS**: Ubuntu (Linux)
+- **Shell**: Nushell (`nu`)
+- **CRITICAL — Nushell-first**: ALL shell commands in this project MUST be optimized for Nushell. Never use bash-specific syntax (`&&`, `||`, subshells, `$()`). Use Nushell idioms:
+  - `http get` instead of `curl`
+  - `open file.json` instead of `cat file.json | jq`
+  - `| where`, `| get`, `| select` for data manipulation
+  - `| lines`, `| split row` for text processing
+  - `| save` instead of `> file`
+  - Pipeline-native structured data — no need for jq, awk, sed
 
 ## Commands
 
-```sh
+```nu
 task blue           # Run all tests (PRIMARY command)
 task test           # Alias for task blue
 task test:short     # Tests without verbose output
-task dev            # go run ./cmd/server/main.go
-task build          # Compile to bin/blue
+task dev            # go run ./cmd/bot/main.go
+task build          # Compile to bin/lumi
 task lint           # go vet ./...
 task tidy           # go mod tidy
 ```
@@ -102,11 +79,13 @@ Tests require no real API key — all HTTP calls are mocked with httptest.
 
 ## Module Structure
 
-Module name: `blue`. Import paths: `blue/internal/loyverse`, `blue/internal/config`.
+Module name: `blue`. Import paths: `blue/internal/loyverse`, `blue/internal/config`, `blue/internal/agent`, `blue/internal/whatsapp`.
 
 ## Loyverse API Client (`internal/loyverse/`)
 
-The client covers all v1 endpoints needed for Blue:
+**Reference**: `docs/loyverse-api.postman_collection.json` — official Postman collection with full schemas for every endpoint.
+
+The client covers the read endpoints needed for Blue:
 
 | Method | Description |
 |--------|-------------|
@@ -119,6 +98,10 @@ The client covers all v1 endpoints needed for Blue:
 | `GetShifts` | Cash register open/close shifts |
 | `ItemNameToID` | Name → ID lookup map |
 
+**Known issues to fix:**
+- `Shift` struct is incomplete — missing `cash_movements[]`, `paid_in`, `paid_out`, `expected_cash`, `actual_cash`, `gross_sales`, `net_sales`, `payments[]`, `taxes[]` (see Postman collection for full schema)
+- `GetShifts` uses wrong query params: `opened_at_min`/`opened_at_max` should be `created_at_min`/`created_at_max`
+
 **Loyverse API quirks** (already handled in the client):
 - Prices are in `variants[].default_price`, NOT `Item.Price` — use `Item.EffectivePrice()`
 - Date format: `2006-01-02T15:04:05.000Z` (always UTC)
@@ -126,59 +109,44 @@ The client covers all v1 endpoints needed for Blue:
 - Auth: `Authorization: Bearer <token>` header
 - Rate limits: not publicly documented — implement exponential backoff, handle HTTP 429
 
-**Receipts: incremental sync** — use `updated_at_min` / `updated_at_max` (not just `created_at_*`) to catch edits and refunds in subsequent syncs.
-
-**Webhooks** — Loyverse supports real-time push events. **Preferred over polling for Blue** — eliminates the need for a sync cronjob.
-
-Confirmed event types (dot-notation, NOT SCREAMING_SNAKE_CASE):
-- `receipts.update` — receipt created OR updated (single event for both)
-- `items.update` — item created or updated
-- `customers.update` — customer created or updated
-
-Note: shifts do NOT have a webhook event type. No "created" vs "updated" split — distinguish via `created_at == updated_at` in the payload.
-
-**Register a webhook:**
-```
-POST https://api.loyverse.com/v1.0/webhooks
-Authorization: Bearer <token>
-{ "type": "receipts.update", "url": "https://your-server/webhooks/loyverse/<secret>", "status": "ENABLED" }
-```
-
-**Payload envelope** (`receipts.update`):
-```json
-{
-  "merchant_id": "...",
-  "type": "receipts.update",
-  "created_at": "2024-03-23T20:18:58.546Z",
-  "receipts": [ { ...full receipt with line_items and payments... } ]
-}
-```
-Line items include `cost` and `cost_total` — Blue can use these directly for margin calculations.
-
-**Retry policy**: 200 retries over 48 hours on non-2xx response. After 48h, webhook is auto-DISABLED.
-→ **CRITICAL**: handler MUST return `200 OK` immediately, then process async (goroutine/channel).
-
-**Signature validation** (`X-Loyverse-Signature`): only present if webhook was registered via OAuth 2.0.
-With a static token, the header is absent. Use a secret path component instead:
-`/webhooks/loyverse/<random-32-char-secret>` — validate it matches env config.
-
-**Fallback**: keep a polling recovery job for receipts missed while the server was down (use `updated_at_min`).
-
-**Additional endpoints not yet implemented** (needed for future modules):
-
-| Endpoint | Module | Notes |
-|----------|--------|-------|
-| `GET /suppliers` | Inventory | Track which supplier sells what at what cost — critical for FIFO |
-| `GET /customers` | Metrics | Loyalty balance, customer segmentation |
-| `GET /employees` | Accounting | Shift attribution |
-| `GET /stores` | Config | Multi-store support |
-| `PUT /inventory` | Inventory | Update stock levels via API |
-| `POST /items/{id}` | Admin | Batch update names, prices, images |
-
 **Testing the client**: Use `WithBaseURL(srv.URL)` option to redirect to an `httptest.Server`:
 ```go
 client := loyverse.NewClient(srv.Client(), "test-token", loyverse.WithBaseURL(srv.URL))
 ```
+
+## WhatsApp Bot (whatsmeow)
+
+The WhatsApp interface uses **whatsmeow** (https://github.com/tulir/whatsmeow), a Go library for WhatsApp Web.
+
+- Open source, zero API cost — connects via WhatsApp Web protocol
+- Requires linking a real phone number once via QR scan
+- Messages arrive → sent to Gemini with tool definitions → Gemini calls Loyverse tools → response sent back via WhatsApp
+
+## Gemini Integration
+
+Uses `google/generative-ai-go` SDK with **function calling** (tool use). Gemini acts as the NLU layer — it interprets natural language queries and decides which Loyverse tool to call.
+
+Each business query maps to a Gemini tool:
+
+| Tool | Loyverse Method | Use Case |
+|------|----------------|----------|
+| `get_sales` | `GetAllReceipts` | Ventas por método de pago en rango |
+| `get_top_products` | `GetAllReceipts` + `GetAllItems` + `GetCategories` | Productos más/menos vendidos por categoría |
+| `get_shift_expenses` | `GetShifts` → `cash_movements` | Gastos por shift (pay outs) |
+| `get_supplier_payments` | `GetShifts` → `cash_movements` filtered | Pagos a proveedores específicos |
+| `get_stock` | `GetAllInventory` | Niveles de stock actuales |
+
+### Supplier alias config
+
+For UC5 (supplier payments), Lumi needs a configured list of supplier names/aliases to filter `cash_movements[].comment` against. This is stored in config (`.env` or a simple JSON file).
+
+## Use Cases (v1)
+
+1. **¿Cuánto se vendió en [rango]?** → Respuesta por método de pago: `Efectivo: $X | Tarjeta: $Y`
+2. **¿Cuáles son los artículos más vendidos en [rango]?** → Por categoría, descendente
+3. **¿En qué se gastó dinero en [rango]?** → Detalle de `cash_movements` por shift, cronológico
+4. **¿Qué productos NO se están vendiendo en [rango]?** → Catálogo vs receipts, por categoría
+5. **¿Cuánto se gastó en proveedores en [rango]?** → `cash_movements` filtrado por aliases
 
 ## Go Conventions
 
@@ -192,35 +160,96 @@ client := loyverse.NewClient(srv.Client(), "test-token", loyverse.WithBaseURL(sr
 ## Environment Variables
 
 ```env
-LOYVERSE_TOKEN=...     # Required — get from Loyverse Admin > Settings > API
-PORT=8080              # Optional, default 8080
-ENV=development        # Optional
+LOYVERSE_TOKEN=...       # Required — get from Loyverse Admin > Settings > API
+GEMINI_API_KEY=...       # Required — get from Google AI Studio
+PORT=8080                # Optional, default 8080
+ENV=development          # Optional
 ```
 
 Copy `.env.example` → `.env`. The config auto-discovers `.env` from cwd and parent dirs.
 
 ## Project Status
 
-**Goal for v1.0**: Functional prototype — sync Loyverse data, track inventory costs, record debts, show basic metrics via WhatsApp. Complex features (full FIFO logic, multi-store, Gemini NLU) are v2+.
-
 | Module | State |
 |--------|-------|
-| Loyverse API client | ✅ Complete + tested |
-| Config | ✅ Complete |
-| DB schema (PostgreSQL) | ✅ Designed — see `docs/schema.md` (migration file pending) |
-| Sync service (Loyverse → DB) | 🟡 Next step |
-| Accounting module (caja, deudas) | 🔴 Not started |
-| Inventory module (FIFO costing) | 🔴 Not started |
-| HTTP API (Gin) | 🔴 Not started |
-| Web dashboard (React + Vite) | 🔴 Not started |
-| WhatsApp bot (whatsmeow, v1 commands) | 🔴 Not started |
+| Loyverse API client | 🟡 Funcional pero incompleto — `Shift` struct desactualizado, bug en query params |
+| Config | ✅ Completo |
+| Gemini agent + tools | 🔴 No iniciado |
+| WhatsApp bot (whatsmeow) | 🔴 No iniciado |
+| Inventory module | 🔴 Phase 2 |
+| Accounting module | 🔴 Phase 2 |
+| PostgreSQL persistence | 🔴 Phase 2 |
+| Web dashboard | 🔴 Phase 3 |
 
 ## Session Continuity
 
-Update `docs/checkpoint.md` at the end of every work session:
-- What was done
-- Files created/modified
-- Pending next steps
-- Open decisions or blockers
+### Inicio de sesión (OBLIGATORIO)
 
-This is the primary context-preservation mechanism between sessions.
+Al iniciar cada sesión, SIEMPRE hacer estas cosas antes de cualquier otra acción:
+
+1. **Leer `docs/chatbot_checkpoint.md`** — es la fuente de verdad del estado actual del proyecto.
+2. **Cargar los skills según el contexto**:
+
+#### Skills Go (cargar siempre)
+| Skill | Path |
+|-------|------|
+| Go pro | `~/.agents/skills/golang-pro/SKILL.md` |
+| Go patterns | `~/.agents/skills/golang-patterns/SKILL.md` |
+| Go testing | `~/.agents/skills/golang-testing/SKILL.md` |
+
+3. **MCP servers disponibles** (configurados en `.claude/settings.local.json`, activos al iniciar):
+
+| MCP | Propósito | Transport |
+|-----|-----------|-----------|
+| `tavily` | Búsqueda web en tiempo real (docs, librerías, ejemplos) | stdio/npx |
+| `context7` | Docs actualizadas de whatsmeow, Gemini SDK, etc. | stdio/npx |
+| `filesystem` | Acceso a archivos del proyecto y directorio padre | stdio/npx |
+
+> **IMPORTANTE**: Tavily y Context7 usan `stdio` con `npx` — NO `type: http`.
+
+#### Skills Tavily (instalados en `.agents/skills/`, usar con `/search`, `/research`, etc.)
+| Skill | Path | Comando |
+|-------|------|---------|
+| Search | `.agents/skills/search/SKILL.md` | `/search` |
+| Research | `.agents/skills/research/SKILL.md` | `/research` |
+| Extract | `.agents/skills/extract/SKILL.md` | `/extract` |
+| Crawl | `.agents/skills/crawl/SKILL.md` | `/crawl` |
+| Best Practices | `.agents/skills/tavily-best-practices/SKILL.md` | `/tavily-best-practices` |
+
+4. **Plugin activo**: `pg@aiguide` v0.3.1 — inyecta documentación real de PostgreSQL (útil en Phase 2).
+
+### Cierre de sesión (OBLIGATORIO)
+
+Al terminar una tarea grande o cuando el usuario indique que va a cerrar la sesión:
+
+1. Actualizar `docs/chatbot_checkpoint.md` con el formato estándar
+2. Hacer un commit descriptivo con todo el progreso de la sesión — formato conventional commits (`feat:`, `fix:`, `docs:`, `refactor:`, etc.). Sin avance de código no hay commit obligatorio, pero si se tocó código **siempre commitear antes de cerrar**.
+
+### Formato del checkpoint (no negociable)
+
+Cada entrada en `docs/chatbot_checkpoint.md` sigue este formato exacto:
+
+```
+## [YYYY-MM-DD] Sesión: <título descriptivo>
+
+### Qué se hizo
+<resumen de 2-4 líneas>
+
+### Archivos modificados/creados
+- `ruta/al/archivo` — descripción del cambio
+
+### Bloqueantes / decisiones pendientes
+- <ítem> (si no hay, omitir la sección)
+
+### Estado al cierre
+| Módulo | Estado |
+|--------|--------|
+| ...    | ...    |
+
+### Próximos pasos
+| Prioridad | Tarea |
+|-----------|-------|
+| 🔴 Alta   | ...   |
+```
+
+Este es el mecanismo principal de continuidad entre sesiones.
