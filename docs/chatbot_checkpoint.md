@@ -1,5 +1,47 @@
 # Lumi — Chatbot Checkpoint
 
+## [2026-02-26] Sesión: Lumi v1.1 — 3 mejoras post-WhatsApp
+
+### Qué se hizo
+
+Implementadas 3 mejoras independientes post-lanzamiento de WhatsApp: (1) filtro de mensajes offline para evitar avalancha de requests al reconectar, (2) modo grupo dedicado via `WHATSAPP_GROUP_JID` para separar conversaciones personales de consultas de negocio, (3) interface LLM que desacopla el Agent del SDK de Gemini, habilitando futuros providers como Groq/OpenAI.
+
+### Archivos creados
+
+- `internal/agent/llm.go` — Interface `LLM` + `Session`, tipos `ToolDef`, `ToolCall`, `ToolResult`
+- `internal/agent/gemini.go` — Implementación `GeminiLLM` que encapsula todo el SDK de Gemini
+
+### Archivos modificados
+
+- `internal/whatsapp/handler.go` — Filtro offline (>30s), modo grupo vs discovery, ignore own messages
+- `internal/whatsapp/bot.go` — Campo `groupJID`, parseo y validación de JID de grupo
+- `internal/config/config.go` — Campo `WhatsAppGroupJID`
+- `internal/agent/tools.go` — Reescrito con `ToolDef` en vez de `*genai.FunctionDeclaration`
+- `internal/agent/agent.go` — Reescrito con interface `LLM` en vez de `*genai.Client`
+- `cmd/bot/main.go` — Wiring actualizado: `NewGeminiLLM()` + parámetro `groupJID`
+
+### Estado al cierre
+
+| Módulo | Sistema | Estado |
+|--------|---------|--------|
+| Loyverse API client | Compartido | ✅ Completo — 34 tests |
+| Config | Compartido | ✅ Completo — con WhatsApp fields + groupJID |
+| Gemini agent + tools | Lumi | ✅ Funcional — desacoplado via LLM interface, 12 tests |
+| CLI entry point | Lumi | ✅ Funcional |
+| WhatsApp bot (whatsmeow) | Lumi | ✅ Funcional — filtro offline + modo grupo |
+
+### Próximos pasos
+
+| Prioridad | Tarea |
+|-----------|-------|
+| 🔴 Alta | Implementar `OpenAILLM` para Groq (14.400 req/día gratis) |
+| 🔴 Alta | Configurar `WHATSAPP_GROUP_JID` en producción y testear modo grupo |
+| 🟡 Media | Completar suppliers.json con proveedores reales |
+| 🟡 Media | Multi-turn memory (historial de chat por sesión) |
+| 🔵 Baja | Planificar Blue Phase 2 |
+
+---
+
 ## [2026-02-26] Sesión: Integración WhatsApp completa — Lumi v1.0 funcional
 
 ### Qué se hizo
