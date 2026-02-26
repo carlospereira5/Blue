@@ -7,16 +7,12 @@ import (
 	"log"
 
 	"blue/internal/loyverse"
-
-	"google.golang.org/genai"
 )
 
-const modelName = "gemini-2.5-flash"
-
-// Agent es el cerebro del chatbot Lumi. Conecta Gemini con Loyverse
+// Agent es el cerebro del chatbot Lumi. Conecta un LLM con Loyverse
 // usando function calling para responder consultas en lenguaje natural.
 type Agent struct {
-	client    *genai.Client
+	llm       LLM
 	loyverse  loyverse.Reader
 	suppliers map[string][]string
 	debug     bool
@@ -31,9 +27,9 @@ func WithDebug(enabled bool) Option {
 }
 
 // New crea un nuevo Agent listo para chatear.
-func New(client *genai.Client, loy loyverse.Reader, suppliers map[string][]string, opts ...Option) *Agent {
+func New(llm LLM, loy loyverse.Reader, suppliers map[string][]string, opts ...Option) *Agent {
 	a := &Agent{
-		client:    client,
+		llm:       llm,
 		loyverse:  loy,
 		suppliers: suppliers,
 	}
@@ -55,40 +51,23 @@ func (a *Agent) debugLog(format string, args ...any) {
 func (a *Agent) Chat(ctx context.Context, message string) (string, error) {
 	a.debugLog(">>> mensaje usuario: %q", message)
 
-	config := &genai.GenerateContentConfig{
-		SystemInstruction: &genai.Content{
-			Parts: []*genai.Part{genai.NewPartFromText(buildSystemPrompt())},
-			Role:  "user",
-		},
-		Tools:       lumiTools(),
-		Temperature: genai.Ptr[float32](0.3),
-	}
-
-	chat, err := a.client.Chats.Create(ctx, modelName, config, nil)
+	session, err := a.llm.NewSession(ctx, buildSystemPrompt(), lumiTools())
 	if err != nil {
-		return "", fmt.Errorf("creating chat session: %w", err)
+		return "", fmt.Errorf("creating session: %w", err)
 	}
-	a.debugLog("chat session creada con modelo %s", modelName)
+	a.debugLog("sesión LLM creada")
 
-	resp, err := chat.Send(ctx, genai.NewPartFromText(message))
+	text, calls, err := session.Send(ctx, message)
 	if err != nil {
 		return "", fmt.Errorf("sending message: %w", err)
 	}
-	a.debugLog("respuesta inicial de Gemini recibida")
-	a.debugResponse(resp)
+	a.debugLog("respuesta inicial: text=%q, calls=%d", truncate(text, 100), len(calls))
 
-	// Function calling loop — max 5 iteraciones como safety.
-	for i := 0; i < 5; i++ {
-		calls := resp.FunctionCalls()
-		if len(calls) == 0 {
-			a.debugLog("no hay function calls — saliendo del loop (iteración %d)", i)
-			break
-		}
-
+	for i := 0; i < 5 && len(calls) > 0; i++ {
 		a.debugLog("--- iteración %d: %d function call(s) ---", i, len(calls))
 
-		var responseParts []*genai.Part
-		for _, fc := range calls {
+		results := make([]ToolResult, len(calls))
+		for j, fc := range calls {
 			a.debugLog("TOOL CALL: %s(%s)", fc.Name, mustJSONString(fc.Args))
 
 			result, execErr := a.ExecuteTool(ctx, fc.Name, fc.Args)
@@ -98,46 +77,21 @@ func (a *Agent) Chat(ctx context.Context, message string) (string, error) {
 			} else {
 				a.debugLog("TOOL RESULT: %s → %s", fc.Name, truncate(mustJSONString(result), 500))
 			}
-			responseParts = append(responseParts, genai.NewPartFromFunctionResponse(fc.Name, result))
+			results[j] = ToolResult{Name: fc.Name, Result: result}
 		}
 
-		resp, err = chat.Send(ctx, responseParts...)
+		text, calls, err = session.SendToolResults(ctx, results)
 		if err != nil {
-			return "", fmt.Errorf("sending function response: %w", err)
+			return "", fmt.Errorf("sending tool results: %w", err)
 		}
-		a.debugLog("respuesta de Gemini tras function response")
-		a.debugResponse(resp)
+		a.debugLog("respuesta tras tool results: text=%q, calls=%d", truncate(text, 100), len(calls))
 	}
 
-	text := resp.Text()
 	a.debugLog("<<< respuesta final: %s", truncate(text, 200))
 	if text == "" {
 		return "No pude generar una respuesta. Intentá reformular tu pregunta.", nil
 	}
 	return text, nil
-}
-
-func (a *Agent) debugResponse(resp *genai.GenerateContentResponse) {
-	if !a.debug || resp == nil {
-		return
-	}
-	for i, c := range resp.Candidates {
-		if c.Content == nil {
-			a.debugLog("  candidate[%d]: content=nil", i)
-			continue
-		}
-		for j, p := range c.Content.Parts {
-			if p.Text != "" {
-				a.debugLog("  candidate[%d].part[%d]: TEXT=%s", i, j, truncate(p.Text, 200))
-			}
-			if p.FunctionCall != nil {
-				a.debugLog("  candidate[%d].part[%d]: FUNCTION_CALL=%s(%s)", i, j, p.FunctionCall.Name, mustJSONString(p.FunctionCall.Args))
-			}
-			if p.FunctionResponse != nil {
-				a.debugLog("  candidate[%d].part[%d]: FUNCTION_RESPONSE=%s", i, j, p.FunctionResponse.Name)
-			}
-		}
-	}
 }
 
 func mustJSONString(v any) string {

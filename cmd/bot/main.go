@@ -38,6 +38,7 @@ func main() {
 		log.Fatalf("gemini client: %v", err)
 	}
 
+	geminiLLM := agent.NewGeminiLLM(geminiClient, "gemini-2.5-flash")
 	loyClient := loyverse.NewClient(http.DefaultClient, cfg.LoyverseAPIKey)
 
 	suppliers, err := agent.LoadSuppliers(cfg.SuppliersFile)
@@ -46,7 +47,7 @@ func main() {
 		suppliers = make(map[string][]string)
 	}
 
-	lumi := agent.New(geminiClient, loyClient, suppliers, agent.WithDebug(cfg.Debug))
+	lumi := agent.New(geminiLLM, loyClient, suppliers, agent.WithDebug(cfg.Debug))
 
 	if cfg.Debug {
 		log.Println("[DEBUG] modo debug activado — logs en stderr")
