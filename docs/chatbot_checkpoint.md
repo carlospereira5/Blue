@@ -1,5 +1,46 @@
 # Lumi — Chatbot Checkpoint
 
+## [2026-02-26] Sesión: Auditoría de lógica interna + 5 fixes
+
+### Qué se hizo
+
+Análisis exhaustivo del flujo de datos de los 5 handlers de Lumi. Se generó diagrama de data flow completo y se encontraron 5 issues lógicos. Los 5 fueron corregidos con tests. Taskfile actualizado para apuntar a `cmd/bot/` y eliminar tasks de Phase 2.
+
+### Bugs corregidos
+
+1. **#3 ALTO** — `handleGetTopProducts` con `sort_order=asc` no mostraba productos con 0 ventas (iteraba solo receipts, no catálogo). Fix: iterar `itemInfo` completo cuando sort es asc.
+2. **#2 MEDIO** — `handleGetSales` computaba `refundsByMethod` pero lo descartaba. Fix: retornar `reembolsos_por_metodo` en output.
+3. **#4 MEDIO** — `handleGetStock` duplicaba items con múltiples variantes/stores. Fix: agregar por `ItemID` antes de construir resultado.
+4. **#1 BAJO** — `parseDateRange` perdía 999ms del último segundo del día. Fix: usar `time.Nanosecond`.
+5. **#5 BAJO** — Tipos `shiftExpense`/`shiftData` declarados pero nunca usados. Eliminados.
+
+### Archivos modificados
+
+- `internal/agent/handlers.go` — 5 fixes aplicados
+- `internal/agent/handlers_test.go` — 3 tests nuevos (zero-sales, refunds breakdown, variant aggregation)
+- `Taskfile.yml` — `dev`/`build` → `cmd/bot/`, agregado `dev:cli`, eliminados `db:*`
+
+### Estado al cierre
+
+| Módulo | Sistema | Estado |
+|--------|---------|--------|
+| Loyverse API client | Compartido | ✅ Completo — 34 tests |
+| Config | Compartido | ✅ Completo |
+| Agent + tools | Lumi | ✅ Funcional — 5 bugs corregidos, 15 handler tests |
+| CLI entry point | Lumi | ✅ Funcional |
+| WhatsApp bot | Lumi | ✅ Funcional — filtro offline + modo grupo |
+
+### Próximos pasos
+
+| Prioridad | Tarea |
+|-----------|-------|
+| 🔴 Alta | Implementar `GroqLLM` (OpenAI-compatible) — 14.400 req/día gratis |
+| 🔴 Alta | Testear Lumi end-to-end con nuevo provider |
+| 🟡 Media | Completar suppliers.json con proveedores reales |
+| 🔵 Baja | Planificar Blue Phase 2 |
+
+---
+
 ## [2026-02-26] Sesión: Lumi v1.1 — 3 mejoras post-WhatsApp
 
 ### Qué se hizo
