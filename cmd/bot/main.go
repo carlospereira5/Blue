@@ -67,7 +67,7 @@ func main() {
 func runWhatsApp(ctx context.Context, lumi *agent.Agent, cfg *config.Config) {
 	log.Printf("[whatsapp] iniciando con %d número(s) autorizado(s)", len(cfg.AllowedNumbers))
 
-	bot, err := whatsapp.New(ctx, lumi, cfg.WhatsAppDBPath, cfg.AllowedNumbers)
+	bot, err := whatsapp.New(ctx, lumi, cfg.WhatsAppDBPath, cfg.AllowedNumbers, cfg.WhatsAppGroupJID)
 	if err != nil {
 		log.Fatalf("whatsapp: %v", err)
 	}

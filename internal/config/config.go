@@ -19,8 +19,9 @@ type Config struct {
 	GeminiAPIKey   string
 	SuppliersFile  string
 	Debug          bool
-	WhatsAppDBPath string
-	AllowedNumbers []string
+	WhatsAppDBPath   string
+	AllowedNumbers   []string
+	WhatsAppGroupJID string
 }
 
 // Load carga la configuración desde variables de entorno.
@@ -36,7 +37,8 @@ func Load() (*Config, error) {
 		SuppliersFile:  getEnv("SUPPLIERS_FILE", "suppliers.json"),
 		Debug:          getEnv("DEBUG", "") == "true",
 		WhatsAppDBPath: getEnv("WHATSAPP_DB_PATH", "whatsapp.db"),
-		AllowedNumbers: parseCSV(getEnv("ALLOWED_NUMBERS", "")),
+		AllowedNumbers:   parseCSV(getEnv("ALLOWED_NUMBERS", "")),
+		WhatsAppGroupJID: getEnv("WHATSAPP_GROUP_JID", ""),
 	}
 
 	if cfg.LoyverseAPIKey == "" {

@@ -19,14 +19,16 @@ import (
 
 // Bot es el wrapper de whatsmeow que conecta WhatsApp con el Agent de Lumi.
 type Bot struct {
-	client  *whatsmeow.Client
-	agent   *agent.Agent
-	allowed map[types.JID]bool
+	client   *whatsmeow.Client
+	agent    *agent.Agent
+	allowed  map[types.JID]bool
+	groupJID types.JID
 }
 
 // New crea un Bot de WhatsApp listo para conectar.
 // allowedNumbers son los números autorizados en formato "5491112345678".
-func New(ctx context.Context, ag *agent.Agent, dbPath string, allowedNumbers []string) (*Bot, error) {
+// groupJID es el JID del grupo donde Lumi escucha (vacío = discovery mode, DMs).
+func New(ctx context.Context, ag *agent.Agent, dbPath string, allowedNumbers []string, groupJID string) (*Bot, error) {
 	dbLog := waLog.Stdout("DB", "WARN", true)
 	dsn := "file:" + dbPath + "?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000"
 	container, err := sqlstore.New(ctx, "sqlite3", dsn, dbLog)
@@ -48,11 +50,27 @@ func New(ctx context.Context, ag *agent.Agent, dbPath string, allowedNumbers []s
 		allowed[jid] = true
 	}
 
-	return &Bot{
+	bot := &Bot{
 		client:  client,
 		agent:   ag,
 		allowed: allowed,
-	}, nil
+	}
+
+	if groupJID != "" {
+		parsed, err := types.ParseJID(groupJID)
+		if err != nil {
+			return nil, fmt.Errorf("parsing WHATSAPP_GROUP_JID %q: %w", groupJID, err)
+		}
+		if parsed.Server != types.GroupServer {
+			return nil, fmt.Errorf("WHATSAPP_GROUP_JID %q no es un grupo (esperado @g.us)", groupJID)
+		}
+		bot.groupJID = parsed
+		log.Printf("[whatsapp] modo grupo: solo escucha en %s", parsed)
+	} else {
+		log.Println("[whatsapp] modo discovery: escucha DMs, logea grupos detectados")
+	}
+
+	return bot, nil
 }
 
 // Start conecta al servidor de WhatsApp y bloquea hasta que ctx se cancele.

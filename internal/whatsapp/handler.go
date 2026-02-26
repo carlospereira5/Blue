@@ -23,8 +23,22 @@ func (b *Bot) handleEvent(evt interface{}) {
 		return
 	}
 
-	// Solo DMs, ignorar grupos.
-	if msg.Info.IsGroup {
+	// --- Modo grupo vs DM ---
+	if b.groupJID.IsEmpty() {
+		// Discovery mode: logear JIDs de grupos, procesar solo DMs.
+		if msg.Info.IsGroup {
+			log.Printf("[whatsapp] [discovery] grupo detectado: %s", msg.Info.Chat)
+			return
+		}
+	} else {
+		// Group mode: SOLO mensajes del grupo configurado.
+		if !msg.Info.IsGroup || msg.Info.Chat != b.groupJID {
+			return
+		}
+	}
+
+	// Ignorar mensajes propios (crítico en grupos).
+	if msg.Info.IsFromMe {
 		return
 	}
 
