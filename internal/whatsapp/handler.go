@@ -3,6 +3,7 @@ package whatsapp
 import (
 	"context"
 	"log"
+	"time"
 
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
@@ -13,6 +14,12 @@ import (
 func (b *Bot) handleEvent(evt interface{}) {
 	msg, ok := evt.(*events.Message)
 	if !ok {
+		return
+	}
+
+	// Ignorar mensajes offline (buffered durante desconexión).
+	if time.Since(msg.Info.Timestamp) > 30*time.Second {
+		log.Printf("[whatsapp] mensaje offline ignorado (%s)", msg.Info.Timestamp.Format(time.RFC3339))
 		return
 	}
 
