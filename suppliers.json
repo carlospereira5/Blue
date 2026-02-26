@@ -1,7 +1,15 @@
 {
-  "Arcor": ["arcor", "Arcor"],
-  "BAT Chile": ["bat", "BAT", "Bat Chile"],
+  "Arcor": ["arcor", "Arcor", "arco"],
+  "Bat Chile": ["bat", "BAT", "Bat Chile", "bat chile"],
   "CCU": ["ccu", "CCU"],
-  "Chip Celular": ["chip", "Chip", "CHIP"],
-  "Coca-Cola": ["coca", "coca-cola", "Coca Cola", "Coca-Cola"]
+  "Chip Celular": ["chip", "Chip", "chip celular", "Chip Celular", "chips"],
+  "Dimak": ["costa confites", "Costa Confites", "confites", "costa", "costa abarrotes", "Costa Abarrotes", "abarrotes"],
+  "Diarios y Revistas": ["diarios", "revistas", "diario", "revista", "Diarios y Revistas"],
+  "Evercrisp": ["evercrisp", "Evercrisp", "papas", "lays"],
+  "Fruna": ["fruna", "Fruna"],
+  "Marinela": ["marinela", "Marinela"],
+  "Marticorena": ["marticorena", "Marticorena"],
+  "Nestle": ["nestle", "Nestle", "nestlé", "Nestlé"],
+  "Savory": ["savory", "Savory", "helados", "helados savory"],
+  "Tres Montes": ["tres montes", "Tres Montes", "tresmontes", "Tresmontes"]
 }
