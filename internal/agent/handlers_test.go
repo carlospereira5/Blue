@@ -38,6 +38,7 @@ func TestHandleGetSales(t *testing.T) {
 			Receipts: []loyverse.Receipt{
 				{
 					ReceiptNumber: "001",
+					ReceiptType:   "SALE",
 					TotalMoney:    1500,
 					Payments: []loyverse.Payment{
 						{PaymentTypeID: "pt-cash", MoneyAmount: 1000},
@@ -46,6 +47,7 @@ func TestHandleGetSales(t *testing.T) {
 				},
 				{
 					ReceiptNumber: "002",
+					ReceiptType:   "SALE",
 					TotalMoney:    800,
 					Payments: []loyverse.Payment{
 						{PaymentTypeID: "pt-cash", MoneyAmount: 800},
@@ -73,12 +75,21 @@ func TestHandleGetSales(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	total, ok := result["total"].(float64)
+	brutas, ok := result["ventas_brutas"].(float64)
 	if !ok {
-		t.Fatalf("total is not float64: %T", result["total"])
+		t.Fatalf("ventas_brutas is not float64: %T", result["ventas_brutas"])
 	}
-	if total != 2300 {
-		t.Errorf("total = %.2f, want 2300", total)
+	if brutas != 2300 {
+		t.Errorf("ventas_brutas = %.2f, want 2300", brutas)
+	}
+	if result["reembolsos"].(float64) != 0 {
+		t.Errorf("reembolsos = %.2f, want 0", result["reembolsos"].(float64))
+	}
+	if result["ventas_netas"].(float64) != 2300 {
+		t.Errorf("ventas_netas = %.2f, want 2300", result["ventas_netas"].(float64))
+	}
+	if result["cantidad_ventas"].(int) != 2 {
+		t.Errorf("cantidad_ventas = %d, want 2", result["cantidad_ventas"].(int))
 	}
 
 	ventas, ok := result["ventas_por_metodo"].(map[string]float64)
@@ -93,6 +104,75 @@ func TestHandleGetSales(t *testing.T) {
 	}
 }
 
+func TestHandleGetSales_WithRefunds(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/receipts", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(mustJSON(t, loyverse.ReceiptsResponse{
+			Receipts: []loyverse.Receipt{
+				{
+					ReceiptNumber: "001",
+					ReceiptType:   "SALE",
+					TotalMoney:    10000,
+					Payments: []loyverse.Payment{
+						{PaymentTypeID: "pt-cash", MoneyAmount: 10000},
+					},
+				},
+				{
+					ReceiptNumber: "002",
+					ReceiptType:   "REFUND",
+					TotalMoney:    2000,
+					Payments: []loyverse.Payment{
+						{PaymentTypeID: "pt-cash", MoneyAmount: 2000},
+					},
+				},
+				{
+					ReceiptNumber: "003",
+					ReceiptType:   "SALE",
+					TotalMoney:    5000,
+					Payments: []loyverse.Payment{
+						{PaymentTypeID: "pt-card", MoneyAmount: 5000},
+					},
+				},
+			},
+		}))
+	})
+	mux.HandleFunc("/payment_types", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(mustJSON(t, loyverse.PaymentTypesResponse{
+			PaymentTypes: []loyverse.PaymentType{
+				{ID: "pt-cash", Name: "Efectivo"},
+				{ID: "pt-card", Name: "Tarjeta"},
+			},
+		}))
+	})
+
+	a := testAgent(t, mux, nil)
+	result, err := a.ExecuteTool(context.Background(), "get_sales", map[string]any{
+		"start_date": "2026-02-25",
+		"end_date":   "2026-02-25",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result["ventas_brutas"].(float64) != 15000 {
+		t.Errorf("ventas_brutas = %.2f, want 15000", result["ventas_brutas"].(float64))
+	}
+	if result["reembolsos"].(float64) != 2000 {
+		t.Errorf("reembolsos = %.2f, want 2000", result["reembolsos"].(float64))
+	}
+	if result["ventas_netas"].(float64) != 13000 {
+		t.Errorf("ventas_netas = %.2f, want 13000 (15000 - 2000)", result["ventas_netas"].(float64))
+	}
+	if result["cantidad_ventas"].(int) != 2 {
+		t.Errorf("cantidad_ventas = %d, want 2", result["cantidad_ventas"].(int))
+	}
+	if result["cantidad_reembolsos"].(int) != 1 {
+		t.Errorf("cantidad_reembolsos = %d, want 1", result["cantidad_reembolsos"].(int))
+	}
+}
+
 func TestHandleGetTopProducts(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/receipts", func(w http.ResponseWriter, r *http.Request) {
@@ -100,6 +180,7 @@ func TestHandleGetTopProducts(t *testing.T) {
 		w.Write(mustJSON(t, loyverse.ReceiptsResponse{
 			Receipts: []loyverse.Receipt{
 				{
+					ReceiptType: "SALE",
 					LineItems: []loyverse.LineItem{
 						{ItemID: "item-1", Quantity: 10},
 						{ItemID: "item-2", Quantity: 5},
@@ -153,6 +234,64 @@ func TestHandleGetTopProducts(t *testing.T) {
 	}
 }
 
+func TestHandleGetTopProducts_SkipsRefunds(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/receipts", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(mustJSON(t, loyverse.ReceiptsResponse{
+			Receipts: []loyverse.Receipt{
+				{
+					ReceiptType: "SALE",
+					LineItems: []loyverse.LineItem{
+						{ItemID: "item-1", Quantity: 10},
+						{ItemID: "item-2", Quantity: 5},
+					},
+				},
+				{
+					ReceiptType: "REFUND",
+					LineItems: []loyverse.LineItem{
+						{ItemID: "item-1", Quantity: 3},
+					},
+				},
+			},
+		}))
+	})
+	mux.HandleFunc("/items", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(mustJSON(t, loyverse.ItemsResponse{
+			Items: []loyverse.Item{
+				{ID: "item-1", ItemName: "Coca Cola", CategoryID: "cat-1"},
+				{ID: "item-2", ItemName: "Alfajor", CategoryID: "cat-2"},
+			},
+		}))
+	})
+	mux.HandleFunc("/categories", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(mustJSON(t, loyverse.CategoriesResponse{
+			Categories: []loyverse.Category{
+				{ID: "cat-1", Name: "Bebidas"},
+				{ID: "cat-2", Name: "Golosinas"},
+			},
+		}))
+	})
+
+	a := testAgent(t, mux, nil)
+	result, err := a.ExecuteTool(context.Background(), "get_top_products", map[string]any{
+		"start_date": "2026-02-25",
+		"end_date":   "2026-02-25",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	productos := result["productos"].([]map[string]any)
+	for _, p := range productos {
+		if p["producto"] == "Coca Cola" && p["cantidad"].(float64) != 10 {
+			t.Errorf("Coca Cola quantity = %v, want 10 (refund of 3 should NOT be counted)", p["cantidad"])
+		}
+	}
+}
+
 func TestHandleGetTopProducts_CategoryFilter(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/receipts", func(w http.ResponseWriter, r *http.Request) {
@@ -160,6 +299,7 @@ func TestHandleGetTopProducts_CategoryFilter(t *testing.T) {
 		w.Write(mustJSON(t, loyverse.ReceiptsResponse{
 			Receipts: []loyverse.Receipt{
 				{
+					ReceiptType: "SALE",
 					LineItems: []loyverse.LineItem{
 						{ItemID: "item-1", Quantity: 10},
 						{ItemID: "item-2", Quantity: 5},

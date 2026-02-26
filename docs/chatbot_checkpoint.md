@@ -1,5 +1,59 @@
 # Lumi — Chatbot Checkpoint
 
+## [2026-02-26] Sesión: Fix refund bug + CLI cleanup + tests actualizados
+
+### Qué se hizo
+
+Descubierto y corregido un bug crítico en el cálculo de ventas: los reembolsos (REFUND) se sumaban como ventas, inflando el total en $18.000 exactos vs lo que muestra Loyverse backoffice. Comparación con screenshots de Loyverse confirmó el problema. Se separaron ventas brutas de reembolsos en `handleGetSales`, se excluyen refunds de `handleGetTopProducts`, se limpió el output del CLI (debug a stderr, chat formateado a stdout), y se actualizaron todos los tests.
+
+### Bug: Refunds contados como ventas
+
+```
+Loyverse backoffice (24 feb 2026):
+  174 ventas + 2 reembolsos = 176 receipts
+  Ventas brutas: $809.150
+  Reembolsos:    $18.000
+  Efectivo: $788.900 | Tarjeta: $20.250
+
+Lumi ANTES del fix:
+  176 receipts → todos sumados como ventas = $827.150
+  Diferencia: exactamente $18.000 (los 2 reembolsos)
+```
+
+### Fixes aplicados
+
+1. **handleGetSales** — Ahora separa `receipt_type == "REFUND"` de `"SALE"`. Retorna `ventas_brutas`, `reembolsos`, `ventas_netas`, `cantidad_ventas`, `cantidad_reembolsos`
+2. **handleGetTopProducts** — Skip de receipts con `ReceiptType == "REFUND"` para no inflar cantidades vendidas
+3. **CLI output** — `log.SetOutput(os.Stderr)` para separar debug del chat. Header con box-drawing, `vos →` / `lumi →` con indentación limpia
+4. **Tests actualizados** — `TestHandleGetSales` chequea nuevo formato (`ventas_brutas`/`ventas_netas` en vez de `total`). Tests nuevos: `TestHandleGetSales_WithRefunds`, `TestHandleGetTopProducts_SkipsRefunds`
+
+### Archivos modificados
+
+- `internal/agent/handlers.go` — handleGetSales separado SALE/REFUND, handleGetTopProducts skip refunds
+- `internal/agent/handlers_test.go` — Tests actualizados + 2 tests nuevos para refunds
+- `cmd/bot/main.go` — Reescrito: debug a stderr, output limpio con box-drawing
+
+### Estado al cierre
+
+| Módulo | Estado |
+|--------|--------|
+| Loyverse API client | ✅ Completo — 34 tests |
+| Config | ✅ Completo — con debug mode |
+| Gemini agent + tools | ✅ Funcional — refund bug fixed, datos verificados vs backoffice |
+| CLI entry point | ✅ Funcional — output limpio |
+| WhatsApp bot (whatsmeow) | 🔴 No iniciado |
+
+### Próximos pasos
+
+| Prioridad | Tarea |
+|-----------|-------|
+| 🔴 Alta | Re-test con la corrección de refunds — verificar que los totales matchean Loyverse |
+| 🔴 Alta | Integrar whatsmeow + QR linking |
+| 🟡 Media | Completar suppliers.json con proveedores reales del kiosco |
+| 🟡 Media | Considerar persistencia de historial de chat (multi-turn) |
+
+---
+
 ## [2026-02-26] Sesión: Root cause found + 3 fixes
 
 ### Qué se hizo

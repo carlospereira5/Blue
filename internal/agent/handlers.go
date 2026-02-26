@@ -39,6 +39,7 @@ func (a *Agent) ExecuteTool(ctx context.Context, name string, args map[string]an
 }
 
 // handleGetSales agrega ventas por método de pago en el rango dado.
+// Separa ventas (SALE) de reembolsos (REFUND) para reportar correctamente.
 func (a *Agent) handleGetSales(ctx context.Context, args map[string]any) (map[string]any, error) {
 	since, until, err := parseDateRange(args)
 	if err != nil {
@@ -61,23 +62,42 @@ func (a *Agent) handleGetSales(ctx context.Context, args map[string]any) (map[st
 		ptNames[pt.ID] = pt.Name
 	}
 
-	totals := make(map[string]float64)
-	var grandTotal float64
+	salesByMethod := make(map[string]float64)
+	refundsByMethod := make(map[string]float64)
+	var totalSales, totalRefunds float64
+	var saleCount, refundCount int
+
 	for _, r := range receipts {
+		isRefund := r.ReceiptType == "REFUND"
+		if isRefund {
+			refundCount++
+		} else {
+			saleCount++
+		}
 		for _, p := range r.Payments {
 			name := ptNames[p.PaymentTypeID]
 			if name == "" {
 				name = "Otro"
 			}
-			totals[name] += p.MoneyAmount
-			grandTotal += p.MoneyAmount
+			if isRefund {
+				refundsByMethod[name] += p.MoneyAmount
+				totalRefunds += p.MoneyAmount
+			} else {
+				salesByMethod[name] += p.MoneyAmount
+				totalSales += p.MoneyAmount
+			}
 		}
 	}
 
+	a.debugLog("handleGetSales: ventas=%d ($%.0f) reembolsos=%d ($%.0f)", saleCount, totalSales, refundCount, totalRefunds)
+
 	return map[string]any{
-		"ventas_por_metodo": totals,
-		"total":             grandTotal,
-		"cantidad_recibos":  len(receipts),
+		"ventas_brutas":     totalSales,
+		"reembolsos":        totalRefunds,
+		"ventas_netas":      totalSales - totalRefunds,
+		"ventas_por_metodo": salesByMethod,
+		"cantidad_ventas":   saleCount,
+		"cantidad_reembolsos": refundCount,
 	}, nil
 }
 
@@ -133,6 +153,9 @@ func (a *Agent) handleGetTopProducts(ctx context.Context, args map[string]any) (
 
 	qty := make(map[string]float64)
 	for _, r := range receipts {
+		if r.ReceiptType == "REFUND" {
+			continue
+		}
 		for _, li := range r.LineItems {
 			qty[li.ItemID] += li.Quantity
 		}
