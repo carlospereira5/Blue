@@ -91,14 +91,18 @@ func (a *Agent) handleGetSales(ctx context.Context, args map[string]any) (map[st
 
 	a.debugLog("handleGetSales: ventas=%d ($%.0f) reembolsos=%d ($%.0f)", saleCount, totalSales, refundCount, totalRefunds)
 
-	return map[string]any{
-		"ventas_brutas":     totalSales,
-		"reembolsos":        totalRefunds,
-		"ventas_netas":      totalSales - totalRefunds,
-		"ventas_por_metodo": salesByMethod,
-		"cantidad_ventas":   saleCount,
-		"cantidad_reembolsos": refundCount,
-	}, nil
+	result := map[string]any{
+		"ventas_brutas":        totalSales,
+		"reembolsos":           totalRefunds,
+		"ventas_netas":         totalSales - totalRefunds,
+		"ventas_por_metodo":    salesByMethod,
+		"cantidad_ventas":      saleCount,
+		"cantidad_reembolsos":  refundCount,
+	}
+	if len(refundsByMethod) > 0 {
+		result["reembolsos_por_metodo"] = refundsByMethod
+	}
+	return result, nil
 }
 
 // productCount almacena la cantidad vendida de un producto.
@@ -162,20 +166,36 @@ func (a *Agent) handleGetTopProducts(ctx context.Context, args map[string]any) (
 	}
 
 	categoryFilter := stringArg(args, "category")
+	sortOrder := stringArg(args, "sort_order")
+
+	// Si sort asc, iterar el catálogo completo para incluir productos con 0 ventas.
+	// Si sort desc (default), solo iterar productos vendidos (optimización).
 	var products []productCount
-	for id, q := range qty {
-		info := itemInfo[id]
-		if categoryFilter != "" && !strings.EqualFold(info.Category, categoryFilter) {
-			continue
+	if sortOrder == "asc" {
+		for id, info := range itemInfo {
+			if categoryFilter != "" && !strings.EqualFold(info.Category, categoryFilter) {
+				continue
+			}
+			products = append(products, productCount{
+				Name:     info.Name,
+				Category: info.Category,
+				Quantity: qty[id], // 0 si no existe en qty
+			})
 		}
-		products = append(products, productCount{
-			Name:     info.Name,
-			Category: info.Category,
-			Quantity: q,
-		})
+	} else {
+		for id, q := range qty {
+			info := itemInfo[id]
+			if categoryFilter != "" && !strings.EqualFold(info.Category, categoryFilter) {
+				continue
+			}
+			products = append(products, productCount{
+				Name:     info.Name,
+				Category: info.Category,
+				Quantity: q,
+			})
+		}
 	}
 
-	sortOrder := stringArg(args, "sort_order")
 	if sortOrder == "asc" {
 		sort.Slice(products, func(i, j int) bool {
 			return products[i].Quantity < products[j].Quantity
@@ -204,13 +224,6 @@ func (a *Agent) handleGetTopProducts(ctx context.Context, args map[string]any) (
 	return map[string]any{"productos": result}, nil
 }
 
-// shiftExpense representa un gasto individual de un shift.
-type shiftExpense struct {
-	Comment   string
-	Amount    float64
-	CreatedAt time.Time
-}
-
 // handleGetShiftExpenses retorna los gastos (PAY_OUT) por shift.
 func (a *Agent) handleGetShiftExpenses(ctx context.Context, args map[string]any) (map[string]any, error) {
 	since, until, err := parseDateRange(args)
@@ -221,12 +234,6 @@ func (a *Agent) handleGetShiftExpenses(ctx context.Context, args map[string]any)
 	shifts, err := a.loyverse.GetAllShifts(ctx, since, until)
 	if err != nil {
 		return nil, fmt.Errorf("get shifts: %w", err)
-	}
-
-	type shiftData struct {
-		OpenedAt string
-		PaidOut  float64
-		Expenses []shiftExpense
 	}
 
 	var result []map[string]any
@@ -345,17 +352,23 @@ func (a *Agent) handleGetStock(ctx context.Context, args map[string]any) (map[st
 		}
 	}
 
+	// Agregar por ItemID para consolidar variantes y multi-store.
+	stockByItem := make(map[string]float64, len(inventory))
+	for _, inv := range inventory {
+		stockByItem[inv.ItemID] += inv.Quantity
+	}
+
 	categoryFilter := stringArg(args, "category")
 	var result []map[string]any
-	for _, inv := range inventory {
-		meta := itemMap[inv.ItemID]
+	for itemID, qty := range stockByItem {
+		meta := itemMap[itemID]
 		if categoryFilter != "" && !strings.EqualFold(meta.Category, categoryFilter) {
 			continue
 		}
 		result = append(result, map[string]any{
 			"producto":  meta.Name,
 			"categoria": meta.Category,
-			"cantidad":  inv.Quantity,
+			"cantidad":  qty,
 		})
 	}
 
@@ -383,8 +396,8 @@ func parseDateRange(args map[string]any) (time.Time, time.Time, error) {
 	if err != nil {
 		return time.Time{}, time.Time{}, fmt.Errorf("parsing end_date %q: %w", endStr, err)
 	}
-	// end_date es inclusivo: hasta las 23:59:59 del día.
-	until = until.Add(24*time.Hour - time.Second)
+	// end_date es inclusivo: hasta el final del día (un nanosegundo antes de medianoche).
+	until = until.Add(24*time.Hour - time.Nanosecond)
 
 	return since.UTC(), until.UTC(), nil
 }

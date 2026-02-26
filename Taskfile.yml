@@ -18,16 +18,23 @@ tasks:
       - go test ./... -count=1
 
   dev:
-    desc: "Corre el servidor en modo desarrollo"
+    desc: "Corre Lumi (WhatsApp si ALLOWED_NUMBERS, CLI si no)"
     cmds:
-      - go run ./cmd/server/main.go
+      - go run ./cmd/bot/main.go
+
+  dev:cli:
+    desc: "Corre Lumi en modo CLI (ignora ALLOWED_NUMBERS)"
+    env:
+      ALLOWED_NUMBERS: ""
+    cmds:
+      - go run ./cmd/bot/main.go
 
   build:
-    desc: "Compila el binario"
+    desc: "Compila el binario de Lumi"
     cmds:
-      - go build -o bin/blue ./cmd/server/main.go
+      - go build -o bin/lumi ./cmd/bot/main.go
     generates:
-      - bin/blue
+      - bin/lumi
 
   lint:
     desc: "Lint con go vet"
@@ -39,24 +46,3 @@ tasks:
     cmds:
       - go mod tidy
 
-  db:up:
-    desc: "Levanta PostgreSQL en Docker"
-    cmds:
-      - docker compose up -d postgres
-
-  db:down:
-    desc: "Detiene PostgreSQL"
-    cmds:
-      - docker compose down
-
-  db:reset:
-    desc: "Resetea la DB completa (destruye datos)"
-    cmds:
-      - docker compose down -v
-      - docker compose up -d postgres
-      - sleep 3
-
-  db:psql:
-    desc: "Abre psql contra la DB local"
-    cmds:
-      - docker compose exec postgres psql -U kiosko -d blue

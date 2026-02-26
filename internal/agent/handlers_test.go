@@ -171,6 +171,14 @@ func TestHandleGetSales_WithRefunds(t *testing.T) {
 	if result["cantidad_reembolsos"].(int) != 1 {
 		t.Errorf("cantidad_reembolsos = %d, want 1", result["cantidad_reembolsos"].(int))
 	}
+
+	reembolsos, ok := result["reembolsos_por_metodo"].(map[string]float64)
+	if !ok {
+		t.Fatalf("reembolsos_por_metodo type = %T, want map[string]float64", result["reembolsos_por_metodo"])
+	}
+	if reembolsos["Efectivo"] != 2000 {
+		t.Errorf("reembolsos Efectivo = %.2f, want 2000", reembolsos["Efectivo"])
+	}
 }
 
 func TestHandleGetTopProducts(t *testing.T) {
@@ -289,6 +297,65 @@ func TestHandleGetTopProducts_SkipsRefunds(t *testing.T) {
 		if p["producto"] == "Coca Cola" && p["cantidad"].(float64) != 10 {
 			t.Errorf("Coca Cola quantity = %v, want 10 (refund of 3 should NOT be counted)", p["cantidad"])
 		}
+	}
+}
+
+func TestHandleGetTopProducts_AscShowsZeroSales(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/receipts", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(mustJSON(t, loyverse.ReceiptsResponse{
+			Receipts: []loyverse.Receipt{
+				{
+					ReceiptType: "SALE",
+					LineItems: []loyverse.LineItem{
+						{ItemID: "item-1", Quantity: 10},
+						{ItemID: "item-2", Quantity: 5},
+					},
+				},
+			},
+		}))
+	})
+	mux.HandleFunc("/items", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(mustJSON(t, loyverse.ItemsResponse{
+			Items: []loyverse.Item{
+				{ID: "item-1", ItemName: "Coca Cola", CategoryID: "cat-1"},
+				{ID: "item-2", ItemName: "Alfajor", CategoryID: "cat-2"},
+				{ID: "item-3", ItemName: "Tab", CategoryID: "cat-1"},
+			},
+		}))
+	})
+	mux.HandleFunc("/categories", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(mustJSON(t, loyverse.CategoriesResponse{
+			Categories: []loyverse.Category{
+				{ID: "cat-1", Name: "Bebidas"},
+				{ID: "cat-2", Name: "Golosinas"},
+			},
+		}))
+	})
+
+	a := testAgent(t, mux, nil)
+	result, err := a.ExecuteTool(context.Background(), "get_top_products", map[string]any{
+		"start_date": "2026-02-25",
+		"end_date":   "2026-02-25",
+		"sort_order": "asc",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	productos := result["productos"].([]map[string]any)
+	if len(productos) != 3 {
+		t.Fatalf("got %d products, want 3 (including zero-sales Tab)", len(productos))
+	}
+	// Tab tiene 0 ventas, debería ser el primero en sort asc.
+	if productos[0]["producto"] != "Tab" {
+		t.Errorf("first product (asc) = %v, want Tab (0 sales)", productos[0]["producto"])
+	}
+	if productos[0]["cantidad"].(float64) != 0 {
+		t.Errorf("Tab quantity = %v, want 0", productos[0]["cantidad"])
 	}
 }
 
@@ -524,6 +591,55 @@ func TestHandleGetStock_CategoryFilter(t *testing.T) {
 	totalProductos := result["total_productos"].(int)
 	if totalProductos != 1 {
 		t.Errorf("total_productos = %d, want 1 (only Bebidas)", totalProductos)
+	}
+}
+
+func TestHandleGetStock_AggregatesVariants(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/inventory", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(mustJSON(t, loyverse.InventoryResponse{
+			Inventories: []loyverse.InventoryLevel{
+				{ItemID: "item-1", VariationID: "var-500ml", Quantity: 30},
+				{ItemID: "item-1", VariationID: "var-1L", Quantity: 15},
+				{ItemID: "item-2", Quantity: 20},
+			},
+		}))
+	})
+	mux.HandleFunc("/items", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(mustJSON(t, loyverse.ItemsResponse{
+			Items: []loyverse.Item{
+				{ID: "item-1", ItemName: "Coca Cola", CategoryID: "cat-1"},
+				{ID: "item-2", ItemName: "Alfajor", CategoryID: "cat-2"},
+			},
+		}))
+	})
+	mux.HandleFunc("/categories", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(mustJSON(t, loyverse.CategoriesResponse{
+			Categories: []loyverse.Category{
+				{ID: "cat-1", Name: "Bebidas"},
+				{ID: "cat-2", Name: "Golosinas"},
+			},
+		}))
+	})
+
+	a := testAgent(t, mux, nil)
+	result, err := a.ExecuteTool(context.Background(), "get_stock", map[string]any{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result["total_productos"].(int) != 2 {
+		t.Errorf("total_productos = %d, want 2 (variants aggregated)", result["total_productos"].(int))
+	}
+
+	stock := result["stock"].([]map[string]any)
+	for _, s := range stock {
+		if s["producto"] == "Coca Cola" && s["cantidad"].(float64) != 45 {
+			t.Errorf("Coca Cola stock = %v, want 45 (30 + 15 variants)", s["cantidad"])
+		}
 	}
 }
 
