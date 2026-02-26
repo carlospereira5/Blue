@@ -1,5 +1,54 @@
 # Lumi — Chatbot Checkpoint
 
+## [2026-02-26] Sesión: Distinción Blue vs Lumi + actualización docs
+
+### Qué se hizo
+
+Definida formalmente la distinción entre los dos sistemas: **Lumi** (chatbot, capa de interacción con Loyverse via lenguaje natural) y **Blue** (motor de inteligencia de negocio — inventario FIFO, contabilidad, márgenes, predicciones). Reescrito CLAUDE.md completo para reflejar esta arquitectura, actualizar el status del proyecto (eliminar issues ya resueltos, corregir SDK name), y documentar el principio axiomático del sistema.
+
+### Decisión arquitectónica: Blue vs Lumi
+
+- **Lumi** = chatbot WhatsApp. Lee datos del POS (Loyverse), responde preguntas simples y semi-complejas. Funciona YA. No persiste nada, no tiene lógica de negocio más allá de agregación básica.
+- **Blue** = motor de inteligencia. Inventario FIFO, contabilidad (caja, deudas, márgenes), predicciones. Se desarrolla DESPUÉS de Lumi, por separado. Requiere PostgreSQL.
+- **Futuro**: Lumi se conecta a Blue para las preguntas que requieran inteligencia real.
+
+### Principio axiomático
+
+El sistema solo es confiable si:
+1. Existe un estado inicial verificado (axioma) donde POS = realidad física
+2. Blue no tiene bugs lógicos en las transiciones de estado
+3. Cada estado futuro es verdadero por inducción matemática
+
+Esto requiere disciplina operacional: caja cerrada a tiempo, inventario contado, TODOS los productos pasados correctamente, TODOS los gastos anotados.
+
+### Archivos modificados
+
+- `CLAUDE.md` — Reescritura completa: distinción Blue/Lumi, status actualizado, SDK corregido (`google.golang.org/genai` no `generative-ai-go`), issues resueltos eliminados, nuevos endpoints documentados, debug mode documentado, principio axiomático
+
+### Estado al cierre
+
+| Módulo | Sistema | Estado |
+|--------|---------|--------|
+| Loyverse API client | Compartido | ✅ Completo — 34 tests |
+| Config | Compartido | ✅ Completo — con debug mode |
+| Gemini agent + tools | Lumi | ✅ Funcional — 5 tools, 12 tests, refund fix |
+| CLI entry point | Lumi | ✅ Funcional |
+| WhatsApp bot (whatsmeow) | Lumi | 🔴 No iniciado |
+| Inventory module (FIFO) | Blue | 🔴 Phase 2 |
+| Accounting module | Blue | 🔴 Phase 2 |
+
+### Próximos pasos
+
+| Prioridad | Tarea |
+|-----------|-------|
+| 🔴 Alta | Re-test Lumi con fix de refunds — verificar vs backoffice |
+| 🔴 Alta | Integrar whatsmeow + QR linking → Lumi v1.0 completo |
+| 🟡 Media | Completar suppliers.json con proveedores reales |
+| 🟡 Media | Mejorar respuestas de Lumi para preguntas semi-complejas (comparativas entre períodos) |
+| 🔵 Baja | Planificar Blue Phase 2: definir módulos, schema PostgreSQL, FIFO inventory |
+
+---
+
 ## [2026-02-26] Sesión: Fix refund bug + CLI cleanup + tests actualizados
 
 ### Qué se hizo

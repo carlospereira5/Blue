@@ -2,19 +2,31 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## What Is Blue
+## Blue vs Lumi — The Two Systems
 
-Blue is a Go backend that complements Loyverse POS. It consumes Loyverse API data and applies custom business logic to automate accounting, inventory, and metrics for a kiosk (~500 sales/day).
+### Blue (the brain)
 
-**Blue does NOT replace Loyverse.** Loyverse is the source of truth for sales data. Blue adds the layer Loyverse doesn't have: margins, inventory costs, cash flow, debt tracking, and predictive metrics.
+Blue is the full business intelligence engine for a kiosk (~500 sales/day). It complements Loyverse POS by adding what Loyverse doesn't have: margins, inventory costs (FIFO), cash flow, debt tracking, and predictive metrics.
+
+**Blue does NOT replace Loyverse.** Loyverse is the source of truth for raw sales data. Blue consumes that data, applies business logic, and produces intelligence.
+
+**The Axiomatic Principle**: Blue's correctness depends on an exact starting state (the "axiom") where POS data perfectly reflects physical reality — inventory counted, cash balanced, every sale registered correctly. From that axiom, if every subsequent state transition is mathematically correct (Blue has no logic bugs), then every future state is guaranteed to be true. This is provable by induction. Blue is only as good as its operational discipline.
+
+### Lumi (the chatbot)
+
+Lumi is the natural language interface — a WhatsApp chatbot powered by Gemini that lets the kiosk team query Loyverse data conversationally. Lumi is intentionally simple: it reads POS data and answers questions. No persistence, no business logic beyond basic aggregation.
+
+**Current state**: Lumi queries Loyverse directly. It works NOW, even with approximate data, as a useful tool while operational discipline improves.
+
+**Future state**: Once Blue's engine is built, Lumi gains access to Blue for the "smart" answers — margins, profitability, predictions, automated decisions.
 
 ### The Three Problems Blue Solves
 
 1. **Accounting/Inventory/POS are siloed** → Blue unifies them under one program using Transaction as the single unifying event.
 2. **Raw POS data with manual processes** → Blue automates everything by consuming Loyverse API and running its own business logic.
-3. **Adoption friction** → WhatsApp chatbot (natural language interface via Gemini) so no one has to "learn new software".
+3. **Adoption friction** → Lumi (WhatsApp chatbot via Gemini) so no one has to "learn new software".
 
-### Core Concepts
+### Core Concepts (Blue Phase 2+)
 
 **Transaction** is the single foundational entity. Every transaction either:
 - Removes a product + adds money (sale → updates accounting book + inventory book)
@@ -29,26 +41,27 @@ Cash(t)      = initial_cash + sales - expenses - debt_payments
 
 ## Development Strategy
 
-**Chatbot-first approach.** Instead of building persistence layers, sync services, and HTTP APIs upfront, we start with a working WhatsApp chatbot that queries Loyverse directly. This validates the core use cases immediately and avoids premature complexity.
+**Chatbot-first approach.** Instead of building persistence layers, sync services, and HTTP APIs upfront, we start with a working WhatsApp chatbot (Lumi) that queries Loyverse directly. This validates the core use cases immediately and avoids premature complexity.
 
 ### Phases
 
-| Phase | Goal | Persistence |
-|-------|------|-------------|
-| **Phase 1** (current) | Loyverse client + Gemini + WhatsApp = working chatbot | None — direct API queries |
-| **Phase 2** | Add inventory module (FIFO costing) + accounting module (caja, deudas) | PostgreSQL |
-| **Phase 3** | Web dashboard for metrics visualization | PostgreSQL |
+| Phase | Goal | System | Persistence |
+|-------|------|--------|-------------|
+| **Phase 1** (current) | Loyverse client + Gemini + WhatsApp = working Lumi | Lumi | None — direct API queries |
+| **Phase 2** | Inventory module (FIFO costing) + accounting module (caja, deudas) | Blue engine | PostgreSQL |
+| **Phase 3** | Lumi connects to Blue for smart answers + web dashboard | Blue + Lumi | PostgreSQL |
 
 ## Architecture (Phase 1 — Chatbot Branch)
 
 ```
-cmd/bot/              → Entry point: WhatsApp bot + Gemini agent
+cmd/bot/              → Entry point: CLI (testing) / WhatsApp bot
 internal/
   config/             → Config from .env (godotenv)
   loyverse/           → Loyverse API client + domain types
-  agent/              → Gemini integration + tool definitions
-  whatsapp/           → whatsmeow wrapper
+  agent/              → Gemini integration + tool definitions + handlers
+  whatsapp/           → whatsmeow wrapper (not started)
 docs/                 → API reference, session checkpoints
+suppliers.json        → Supplier name → aliases mapping for UC5
 ```
 
 ## Environment
@@ -85,7 +98,7 @@ Module name: `blue`. Import paths: `blue/internal/loyverse`, `blue/internal/conf
 
 **Reference**: `docs/loyverse-api.postman_collection.json` — official Postman collection with full schemas for every endpoint.
 
-The client covers the read endpoints needed for Blue:
+The client covers the read endpoints needed for Lumi:
 
 | Method | Description |
 |--------|-------------|
@@ -95,12 +108,13 @@ The client covers the read endpoints needed for Blue:
 | `GetItemByID` | Single item |
 | `GetCategories` | All categories (not paginated) |
 | `GetInventory` / `GetAllInventory` | Stock levels, auto-paginated |
-| `GetShifts` | Cash register open/close shifts |
+| `GetShifts` / `GetAllShifts` | Cash register shifts with cash_movements |
+| `GetShiftByID` | Single shift |
+| `GetEmployees` / `GetAllEmployees` | Employee list |
+| `GetStores` / `GetStoreByID` | Store info |
+| `GetPaymentTypes` | Payment method catalog |
+| `GetSuppliers` / `GetAllSuppliers` | Supplier list |
 | `ItemNameToID` | Name → ID lookup map |
-
-**Known issues to fix:**
-- `Shift` struct is incomplete — missing `cash_movements[]`, `paid_in`, `paid_out`, `expected_cash`, `actual_cash`, `gross_sales`, `net_sales`, `payments[]`, `taxes[]` (see Postman collection for full schema)
-- `GetShifts` uses wrong query params: `opened_at_min`/`opened_at_max` should be `created_at_min`/`created_at_max`
 
 **Loyverse API quirks** (already handled in the client):
 - Prices are in `variants[].default_price`, NOT `Item.Price` — use `Item.EffectivePrice()`
@@ -108,6 +122,7 @@ The client covers the read endpoints needed for Blue:
 - Max 250 items per request; cursor-based pagination (not offset)
 - Auth: `Authorization: Bearer <token>` header
 - Rate limits: not publicly documented — implement exponential backoff, handle HTTP 429
+- Free tier: cannot query receipts older than 31 days (returns 402 PAYMENT_REQUIRED)
 
 **Testing the client**: Use `WithBaseURL(srv.URL)` option to redirect to an `httptest.Server`:
 ```go
@@ -122,30 +137,42 @@ The WhatsApp interface uses **whatsmeow** (https://github.com/tulir/whatsmeow), 
 - Requires linking a real phone number once via QR scan
 - Messages arrive → sent to Gemini with tool definitions → Gemini calls Loyverse tools → response sent back via WhatsApp
 
-## Gemini Integration
+## Gemini Integration (`internal/agent/`)
 
-Uses `google/generative-ai-go` SDK with **function calling** (tool use). Gemini acts as the NLU layer — it interprets natural language queries and decides which Loyverse tool to call.
+Uses **`google.golang.org/genai`** SDK v1.48.0 (new official SDK, NOT the legacy `generative-ai-go`) with **function calling** (tool use). Model: `gemini-2.5-flash`.
+
+Gemini acts as the NLU layer — it interprets natural language queries and decides which Loyverse tool to call.
 
 Each business query maps to a Gemini tool:
 
 | Tool | Loyverse Method | Use Case |
 |------|----------------|----------|
-| `get_sales` | `GetAllReceipts` | Ventas por método de pago en rango |
+| `get_sales` | `GetAllReceipts` + `GetPaymentTypes` | Ventas brutas/netas por método de pago, separando reembolsos |
 | `get_top_products` | `GetAllReceipts` + `GetAllItems` + `GetCategories` | Productos más/menos vendidos por categoría |
-| `get_shift_expenses` | `GetShifts` → `cash_movements` | Gastos por shift (pay outs) |
-| `get_supplier_payments` | `GetShifts` → `cash_movements` filtered | Pagos a proveedores específicos |
-| `get_stock` | `GetAllInventory` | Niveles de stock actuales |
+| `get_shift_expenses` | `GetAllShifts` → `cash_movements` | Gastos por shift (pay outs) |
+| `get_supplier_payments` | `GetAllShifts` → `cash_movements` filtered | Pagos a proveedores específicos |
+| `get_stock` | `GetAllInventory` + `GetAllItems` + `GetCategories` | Niveles de stock actuales |
+
+### Key implementation details
+
+- **System prompt**: Dynamic — injects current date (Argentina timezone) on every `Chat()` call. Gemini doesn't know the real date otherwise.
+- **Refund handling**: `handleGetSales` separates `receipt_type == "SALE"` from `"REFUND"`. Returns `ventas_brutas`, `reembolsos`, `ventas_netas`. `handleGetTopProducts` skips refund receipts entirely.
+- **No chat history**: Each `Chat()` call is independent (Phase 1). Multi-turn memory is a future enhancement.
+- **Debug mode**: `DEBUG=true` env var activates verbose logging of the entire Gemini ↔ Loyverse pipeline to stderr.
 
 ### Supplier alias config
 
-For UC5 (supplier payments), Lumi needs a configured list of supplier names/aliases to filter `cash_movements[].comment` against. This is stored in config (`.env` or a simple JSON file).
+For UC5 (supplier payments), Lumi needs a configured list of supplier names/aliases to filter `cash_movements[].comment` against. Stored in `suppliers.json`:
+```json
+{"Coca-Cola": ["coca", "coca-cola", "Coca Cola"]}
+```
 
-## Use Cases (v1)
+## Use Cases (Lumi v1)
 
-1. **¿Cuánto se vendió en [rango]?** → Respuesta por método de pago: `Efectivo: $X | Tarjeta: $Y`
-2. **¿Cuáles son los artículos más vendidos en [rango]?** → Por categoría, descendente
+1. **¿Cuánto se vendió en [rango]?** → Ventas brutas, reembolsos, netas, desglose por método de pago
+2. **¿Cuáles son los artículos más vendidos en [rango]?** → Por categoría, con sort asc/desc
 3. **¿En qué se gastó dinero en [rango]?** → Detalle de `cash_movements` por shift, cronológico
-4. **¿Qué productos NO se están vendiendo en [rango]?** → Catálogo vs receipts, por categoría
+4. **¿Qué productos NO se están vendiendo en [rango]?** → Via `get_top_products` con `sort_order: "asc"`
 5. **¿Cuánto se gastó en proveedores en [rango]?** → `cash_movements` filtrado por aliases
 
 ## Go Conventions
@@ -162,6 +189,8 @@ For UC5 (supplier payments), Lumi needs a configured list of supplier names/alia
 ```env
 LOYVERSE_TOKEN=...       # Required — get from Loyverse Admin > Settings > API
 GEMINI_API_KEY=...       # Required — get from Google AI Studio
+SUPPLIERS_FILE=...       # Optional — path to suppliers.json (default: suppliers.json)
+DEBUG=true               # Optional — verbose logging to stderr
 PORT=8080                # Optional, default 8080
 ENV=development          # Optional
 ```
@@ -170,16 +199,17 @@ Copy `.env.example` → `.env`. The config auto-discovers `.env` from cwd and pa
 
 ## Project Status
 
-| Module | State |
-|--------|-------|
-| Loyverse API client | 🟡 Funcional pero incompleto — `Shift` struct desactualizado, bug en query params |
-| Config | ✅ Completo |
-| Gemini agent + tools | 🔴 No iniciado |
-| WhatsApp bot (whatsmeow) | 🔴 No iniciado |
-| Inventory module | 🔴 Phase 2 |
-| Accounting module | 🔴 Phase 2 |
-| PostgreSQL persistence | 🔴 Phase 2 |
-| Web dashboard | 🔴 Phase 3 |
+| Module | System | State |
+|--------|--------|-------|
+| Loyverse API client | Shared | ✅ Completo — 34 tests, all endpoints, structs aligned to Postman collection |
+| Config | Shared | ✅ Completo — with debug mode |
+| Gemini agent + tools | Lumi | ✅ Funcional — 5 tools, 5 handlers, refund handling, 12 tests |
+| CLI entry point | Lumi | ✅ Funcional — testing interface before WhatsApp |
+| WhatsApp bot (whatsmeow) | Lumi | 🔴 No iniciado |
+| Inventory module (FIFO) | Blue | 🔴 Phase 2 |
+| Accounting module | Blue | 🔴 Phase 2 |
+| PostgreSQL persistence | Blue | 🔴 Phase 2 |
+| Web dashboard | Blue | 🔴 Phase 3 |
 
 ## Session Continuity
 
