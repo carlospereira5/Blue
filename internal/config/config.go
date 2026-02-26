@@ -12,16 +12,12 @@ import (
 
 // Config es la configuración principal de la aplicación.
 type Config struct {
-	Port             string
-	Env              string
-	LoyverseAPIKey   string
-	PostgresHost     string
-	PostgresPort     string
-	PostgresUser     string
-	PostgresPassword string
-	PostgresDB       string
-	PostgresSSLMode  string
-	WebhookSecret    string
+	Port           string
+	Env            string
+	LoyverseAPIKey string
+	GeminiAPIKey   string
+	SuppliersFile  string
+	Debug          bool
 }
 
 // Load carga la configuración desde variables de entorno.
@@ -30,30 +26,22 @@ func Load() (*Config, error) {
 	loadEnvFiles()
 
 	cfg := &Config{
-		Port:             getEnv("PORT", "8080"),
-		Env:              getEnv("ENV", "development"),
-		LoyverseAPIKey:   getEnv("LOYVERSE_TOKEN", ""),
-		PostgresHost:     getEnv("POSTGRES_HOST", "localhost"),
-		PostgresPort:     getEnv("POSTGRES_PORT", "5432"),
-		PostgresUser:     getEnv("POSTGRES_USER", "kiosko"),
-		PostgresPassword: getEnv("POSTGRES_PASSWORD", ""),
-		PostgresDB:       getEnv("POSTGRES_DB", "blue"),
-		PostgresSSLMode:  getEnv("POSTGRES_SSLMODE", "disable"),
-		WebhookSecret:    getEnv("WEBHOOK_SECRET", ""),
+		Port:           getEnv("PORT", "8080"),
+		Env:            getEnv("ENV", "development"),
+		LoyverseAPIKey: getEnv("LOYVERSE_TOKEN", ""),
+		GeminiAPIKey:   getEnv("GEMINI_API_KEY", ""),
+		SuppliersFile:  getEnv("SUPPLIERS_FILE", "suppliers.json"),
+		Debug:          getEnv("DEBUG", "") == "true",
 	}
 
 	if cfg.LoyverseAPIKey == "" {
 		return nil, fmt.Errorf("LOYVERSE_TOKEN es requerido")
 	}
+	if cfg.GeminiAPIKey == "" {
+		return nil, fmt.Errorf("GEMINI_API_KEY es requerido")
+	}
 
 	return cfg, nil
-}
-
-// DSN retorna el connection string de PostgreSQL.
-func (c *Config) DSN() string {
-	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-		c.PostgresHost, c.PostgresPort, c.PostgresUser,
-		c.PostgresPassword, c.PostgresDB, c.PostgresSSLMode)
 }
 
 func loadEnvFiles() {
