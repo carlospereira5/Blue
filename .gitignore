@@ -4,3 +4,8 @@
 *.out
 /bin/
 /dist/
+/bot
+whatsapp.db*
+.agents/
+.claude/
+skills-lock.json

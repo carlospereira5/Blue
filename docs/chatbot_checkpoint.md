@@ -1,5 +1,57 @@
 # Lumi — Chatbot Checkpoint
 
+## [2026-02-26] Sesión: Integración WhatsApp completa — Lumi v1.0 funcional
+
+### Qué se hizo
+
+Implementación completa del módulo WhatsApp usando whatsmeow. Lumi ahora recibe mensajes de WhatsApp, los despacha a Gemini, y envía la respuesta de vuelta. Primera prueba exitosa en producción real con dos usuarios. Se descubrieron y resolvieron 3 problemas durante el testing: QR demasiado grande, SQLite locks por concurrencia, y WhatsApp LID (Linked Identity) que reemplaza JIDs tradicionales.
+
+### Problemas descubiertos y resueltos
+
+1. **QR demasiado grande** — `qrterminal.GenerateHalfBlock` genera un QR con quiet zone de 4 bloques. Fix: `GenerateWithConfig` con `QuietZone: 1`.
+2. **"database is locked"** — SQLite no soporta escrituras concurrentes con journal mode DELETE. Fix: `_journal_mode=WAL&_busy_timeout=5000` en el DSN.
+3. **WhatsApp LID vs JID** — WhatsApp ahora manda sender como `185092353872022@lid` en vez de `56983485458@s.whatsapp.net`. La whitelist comparaba contra JIDs y siempre rechazaba. Fix: `client.Store.GetAltJID()` para resolver LID → número de teléfono.
+
+### Problemas identificados pendientes
+
+1. **Sin chat dedicado** — Lumi escucha TODOS los DMs del número vinculado. Mensajes personales se mezclan con consultas de negocio. Solución: Lumi debe escuchar en un grupo de WhatsApp específico.
+2. **Rate limit Gemini free tier** — 5 req/min, 20 req/día. Mensajes offline de reconexión disparan avalancha de requests. Solución: interface LLM desacoplada + Groq como alternativa (14.400 req/día gratis).
+3. **Mensajes offline** — Al reconectar, whatsmeow entrega mensajes acumulados como si fueran nuevos. Solución: filtrar por timestamp.
+
+### Archivos creados
+
+- `internal/whatsapp/bot.go` — Bot struct, New() con SQLite store + WAL, Start() con QR flow, graceful shutdown
+- `internal/whatsapp/handler.go` — Event handler, whitelist con resolución LID→PN, extractText, dispatch a goroutine
+
+### Archivos modificados
+
+- `internal/config/config.go` — Agregados `WhatsAppDBPath`, `AllowedNumbers`, `parseCSV()`
+- `cmd/bot/main.go` — Mode switch (WhatsApp vs CLI), extraído `runCLI()`
+- `.env.example` — Agregados `WHATSAPP_DB_PATH`, `ALLOWED_NUMBERS`
+- `go.mod` — whatsmeow, go-sqlite3, qrterminal + dependencias transitivas
+
+### Estado al cierre
+
+| Módulo | Sistema | Estado |
+|--------|---------|--------|
+| Loyverse API client | Compartido | ✅ Completo — 34 tests |
+| Config | Compartido | ✅ Completo — con WhatsApp fields |
+| Gemini agent + tools | Lumi | ✅ Funcional — 5 tools, 12 tests |
+| CLI entry point | Lumi | ✅ Funcional |
+| WhatsApp bot (whatsmeow) | Lumi | ✅ Funcional — probado en producción |
+
+### Próximos pasos
+
+| Prioridad | Tarea |
+|-----------|-------|
+| 🔴 Alta | Chat dedicado — Lumi escucha solo en un grupo de WhatsApp específico |
+| 🔴 Alta | Interface LLM — desacoplar de Gemini, implementar provider OpenAI-compatible (Groq) |
+| 🟡 Media | Filtrar mensajes offline al reconectar (ignorar mensajes con >30s de antigüedad) |
+| 🟡 Media | Completar suppliers.json con proveedores reales |
+| 🔵 Baja | Planificar Blue Phase 2 |
+
+---
+
 ## [2026-02-26] Sesión: Distinción Blue vs Lumi + actualización docs
 
 ### Qué se hizo

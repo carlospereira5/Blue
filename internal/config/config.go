@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -18,6 +19,8 @@ type Config struct {
 	GeminiAPIKey   string
 	SuppliersFile  string
 	Debug          bool
+	WhatsAppDBPath string
+	AllowedNumbers []string
 }
 
 // Load carga la configuración desde variables de entorno.
@@ -32,6 +35,8 @@ func Load() (*Config, error) {
 		GeminiAPIKey:   getEnv("GEMINI_API_KEY", ""),
 		SuppliersFile:  getEnv("SUPPLIERS_FILE", "suppliers.json"),
 		Debug:          getEnv("DEBUG", "") == "true",
+		WhatsAppDBPath: getEnv("WHATSAPP_DB_PATH", "whatsapp.db"),
+		AllowedNumbers: parseCSV(getEnv("ALLOWED_NUMBERS", "")),
 	}
 
 	if cfg.LoyverseAPIKey == "" {
@@ -78,4 +83,18 @@ func getEnv(key, defaultValue string) string {
 		return v
 	}
 	return defaultValue
+}
+
+func parseCSV(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			result = append(result, v)
+		}
+	}
+	return result
 }

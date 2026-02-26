@@ -13,6 +13,7 @@ import (
 	"blue/internal/agent"
 	"blue/internal/config"
 	"blue/internal/loyverse"
+	"blue/internal/whatsapp"
 
 	"google.golang.org/genai"
 )
@@ -56,6 +57,33 @@ func main() {
 		log.Printf("[DEBUG] SuppliersFile: %s (%d proveedores cargados)", cfg.SuppliersFile, len(suppliers))
 	}
 
+	if len(cfg.AllowedNumbers) > 0 {
+		runWhatsApp(ctx, lumi, cfg)
+	} else {
+		runCLI(ctx, lumi)
+	}
+}
+
+func runWhatsApp(ctx context.Context, lumi *agent.Agent, cfg *config.Config) {
+	log.Printf("[whatsapp] iniciando con %d número(s) autorizado(s)", len(cfg.AllowedNumbers))
+
+	bot, err := whatsapp.New(ctx, lumi, cfg.WhatsAppDBPath, cfg.AllowedNumbers)
+	if err != nil {
+		log.Fatalf("whatsapp: %v", err)
+	}
+
+	fmt.Println()
+	fmt.Println("  ╔══════════════════════════════════╗")
+	fmt.Println("  ║   Lumi — WhatsApp Bot            ║")
+	fmt.Println("  ╚══════════════════════════════════╝")
+	fmt.Println()
+
+	if err := bot.Start(ctx); err != nil {
+		log.Fatalf("whatsapp: %v", err)
+	}
+}
+
+func runCLI(ctx context.Context, lumi *agent.Agent) {
 	fmt.Println()
 	fmt.Println("  ╔══════════════════════════════════╗")
 	fmt.Println("  ║   Lumi — Asistente del kiosco    ║")
