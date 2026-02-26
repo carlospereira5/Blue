@@ -1,5 +1,48 @@
 # Lumi — Chatbot Checkpoint
 
+## [2026-02-26] Sesión: Integración Groq (OpenAI-compatible provider)
+
+### Qué se hizo
+
+Integrado Groq como segundo proveedor LLM via API compatible con OpenAI. Se creó `OpenAILLM` usando `sashabaranov/go-openai` v1.41.2 con `BaseURL` configurable. Config actualizado con `PROVIDER`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`. Factory pattern en `main.go` selecciona provider al arrancar. Se encontró y corrigió un bug en el mapeo de ToolCallIDs (colisión por nombre en vez de por índice). El trabajo base fue hecho por el usuario con asistencia de Gemini en la rama `Trabajo_con_Gemini`, revisado e integrado en `chatbot` con fix aplicado.
+
+### Bug corregido
+
+- **ToolCallID collision** — `lastToolCallIDs` era `map[string]string` keyed by function name. Si el LLM llama al mismo tool 2 veces, el segundo ID sobreescribe el primero → respuesta con ID incorrecto → error 400. Fix: cambiar a `[]string` (index-based, paralelo a `[]ToolCall`).
+
+### Archivos creados
+
+- `internal/agent/openai.go` — `OpenAILLM` + `openAISession` implementando `LLM`/`Session` interfaces. Maneja JSON Schema strict de Groq (omite `required` si nil). Modelo: `llama-3.3-70b-versatile`.
+
+### Archivos modificados
+
+- `internal/config/config.go` — Campos `Provider`, `OpenAIAPIKey`, `OpenAIBaseURL`. Validación por provider.
+- `cmd/bot/main.go` — Factory pattern: `PROVIDER=openai` → `OpenAILLM`, else → `GeminiLLM`. Debug logs per-provider.
+- `go.mod` / `go.sum` — Agregado `github.com/sashabaranov/go-openai` v1.41.2
+
+### Estado al cierre
+
+| Módulo | Sistema | Estado |
+|--------|---------|--------|
+| Loyverse API client | Compartido | ✅ Completo — 34 tests |
+| Config | Compartido | ✅ Completo — multi-provider |
+| Agent + tools | Lumi | ✅ Funcional — 2 providers (Gemini + Groq), 15 handler tests |
+| CLI entry point | Lumi | ✅ Funcional |
+| WhatsApp bot | Lumi | ✅ Funcional — filtro offline + modo grupo |
+
+### Próximos pasos
+
+| Prioridad | Tarea |
+|-----------|-------|
+| 🔴 Alta | Testear Lumi end-to-end con Groq (PROVIDER=openai) |
+| 🔴 Alta | Asociar segunda cuenta de WhatsApp para probar modo grupo |
+| 🟡 Media | Completar suppliers.json con proveedores reales |
+| 🟡 Media | Multi-turn memory (historial de chat por sesión) |
+| 🔵 Baja | Eliminar rama `Trabajo_con_Gemini` (ya integrada) |
+| 🔵 Baja | Planificar Blue Phase 2 |
+
+---
+
 ## [2026-02-26] Sesión: Auditoría de lógica interna + 5 fixes
 
 ### Qué se hizo
