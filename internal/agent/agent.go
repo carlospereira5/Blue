@@ -57,7 +57,7 @@ func (a *Agent) Chat(ctx context.Context, message string) (string, error) {
 
 	config := &genai.GenerateContentConfig{
 		SystemInstruction: &genai.Content{
-			Parts: []*genai.Part{genai.NewPartFromText(systemPrompt)},
+			Parts: []*genai.Part{genai.NewPartFromText(buildSystemPrompt())},
 			Role:  "user",
 		},
 		Tools:       lumiTools(),

@@ -1,7 +1,7 @@
 {
-  "Arcor": ["arcor", "Arco", "Arcor"],
+  "Arcor": ["arcor", "Arcor"],
   "BAT Chile": ["bat", "BAT", "Bat Chile"],
-  "CCU": ["ccu", "CCU", "Ccu"]
-  "Chip Celular": ["CHip", "Chip", "CHIP"],
-  "Coca-Cola": 
+  "CCU": ["ccu", "CCU"],
+  "Chip Celular": ["chip", "Chip", "CHIP"],
+  "Coca-Cola": ["coca", "coca-cola", "Coca Cola", "Coca-Cola"]
 }

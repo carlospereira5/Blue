@@ -1,5 +1,66 @@
 # Lumi — Chatbot Checkpoint
 
+## [2026-02-26] Sesión: Root cause found + 3 fixes
+
+### Qué se hizo
+
+Identificada la causa raíz del problema de "datos vacíos": Gemini no sabe qué fecha es hoy (knowledge cutoff ~2024). Cuando el usuario dice "ayer", Gemini manda `2024-07-29` en vez de `2026-02-25`. Con fecha explícita funciona perfecto (176 receipts, $827.150). Se aplicaron 3 fixes.
+
+### Root cause
+
+```
+vos> cuanto se vendio ayer?
+FUNCTION_CALL=get_sales({"end_date":"2024-07-29","start_date":"2024-07-29"})
+→ Loyverse 402: PAYMENT_REQUIRED (más de 31 días atrás)
+
+vos> cuales fueron las ventas del 24 de febrero de 2026?
+FUNCTION_CALL=get_sales({"end_date":"2026-02-24","start_date":"2026-02-24"})
+→ 176 receipts, $827.150 ✅
+```
+
+**Gemini usa su knowledge cutoff como referencia temporal.** Sin fecha inyectada en el system prompt, "hoy" para Gemini es ~julio 2024.
+
+### Fixes aplicados
+
+1. **System prompt con fecha dinámica** — `buildSystemPrompt()` inyecta la fecha actual de Argentina en cada `Chat()`. Incluye "hoy es X, ayer es Y" explícitamente.
+2. **suppliers.json corregido** — JSON inválido (faltaba coma después de "CCU", "Coca-Cola" truncado). Reconstruido con datos correctos.
+3. **sort_order en get_top_products** — Nuevo parámetro `sort_order` (asc/desc) para que Gemini pueda pedir "menos vendidos" (UC4). El prompt instruye a usar `sort_order: "asc"` para productos sin ventas.
+
+### Issues secundarios descubiertos
+
+- **Loyverse free tier**: no permite consultar receipts de más de 31 días. Error 402 `PAYMENT_REQUIRED`. Lumi ahora informa esto al usuario gracias al manejo de errores existente.
+- **"qué productos casi no se vendieron"**: Gemini pedía top 5 descendente (los MÁS vendidos). Con el nuevo `sort_order: "asc"`, debería pedir los menos vendidos.
+
+### Archivos modificados
+
+- `internal/agent/prompt.go` — Cambiado de `const` a `buildSystemPrompt()` con fecha dinámica
+- `internal/agent/agent.go` — Usa `buildSystemPrompt()` en vez de `systemPrompt`
+- `internal/agent/tools.go` — Agregado `sort_order` (asc/desc) a `get_top_products`
+- `internal/agent/handlers.go` — Implementado sort ascendente/descendente en handler
+- `suppliers.json` — Corregido JSON syntax + datos reconstruidos
+
+### Estado al cierre
+
+| Módulo | Estado |
+|--------|--------|
+| Loyverse API client | ✅ Completo — 34 tests |
+| Config | ✅ Completo — con debug mode |
+| Gemini agent + tools | ✅ Funcional — root cause fixed, pendiente re-test |
+| CLI entry point | ✅ Funcional — `go run ./cmd/bot/` |
+| WhatsApp bot (whatsmeow) | 🔴 No iniciado |
+
+### Próximos pasos
+
+| Prioridad | Tarea |
+|-----------|-------|
+| 🔴 Alta | Re-test con DEBUG=true — verificar que "ayer" ahora manda 2026-02-25 |
+| 🔴 Alta | Re-test UC4 (productos sin ventas) — verificar sort_order asc |
+| 🟡 Media | Completar suppliers.json con proveedores reales del kiosco |
+| 🟡 Media | Integrar whatsmeow + QR linking |
+| 🟡 Media | Entry point `cmd/bot/main.go` con graceful shutdown |
+
+---
+
 ## [2026-02-26] Sesión: Primera prueba real + debug mode
 
 ### Qué se hizo

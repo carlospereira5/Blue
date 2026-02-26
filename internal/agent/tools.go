@@ -59,6 +59,11 @@ func topProductsTool() *genai.FunctionDeclaration {
 					Type:        genai.TypeInteger,
 					Description: "Cantidad máxima de productos a retornar (default 10)",
 				},
+				"sort_order": {
+					Type:        genai.TypeString,
+					Description: "Orden: 'desc' para más vendidos (default), 'asc' para menos vendidos",
+					Enum:        []string{"asc", "desc"},
+				},
 			},
 			Required: []string{"start_date", "end_date"},
 		},

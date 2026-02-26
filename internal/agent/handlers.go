@@ -152,9 +152,16 @@ func (a *Agent) handleGetTopProducts(ctx context.Context, args map[string]any) (
 		})
 	}
 
-	sort.Slice(products, func(i, j int) bool {
-		return products[i].Quantity > products[j].Quantity
-	})
+	sortOrder := stringArg(args, "sort_order")
+	if sortOrder == "asc" {
+		sort.Slice(products, func(i, j int) bool {
+			return products[i].Quantity < products[j].Quantity
+		})
+	} else {
+		sort.Slice(products, func(i, j int) bool {
+			return products[i].Quantity > products[j].Quantity
+		})
+	}
 
 	limit := intArg(args, "limit", 10)
 	if limit > len(products) {
