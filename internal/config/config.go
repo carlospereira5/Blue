@@ -13,30 +13,35 @@ import (
 
 // Config es la configuración principal de la aplicación.
 type Config struct {
-	Port           string
-	Env            string
-	LoyverseAPIKey string
-	GeminiAPIKey   string
-	SuppliersFile  string
-	Debug          bool
+	Port             string
+	Env              string
+	Provider         string // "gemini" o "openai"
+	LoyverseAPIKey   string
+	GeminiAPIKey     string
+	OpenAIAPIKey     string
+	OpenAIBaseURL    string
+	SuppliersFile    string
+	Debug            bool
 	WhatsAppDBPath   string
 	AllowedNumbers   []string
 	WhatsAppGroupJID string
 }
 
 // Load carga la configuración desde variables de entorno.
-// Automáticamente busca archivos .env en múltiples ubicaciones.
 func Load() (*Config, error) {
 	loadEnvFiles()
 
 	cfg := &Config{
-		Port:           getEnv("PORT", "8080"),
-		Env:            getEnv("ENV", "development"),
-		LoyverseAPIKey: getEnv("LOYVERSE_TOKEN", ""),
-		GeminiAPIKey:   getEnv("GEMINI_API_KEY", ""),
-		SuppliersFile:  getEnv("SUPPLIERS_FILE", "suppliers.json"),
-		Debug:          getEnv("DEBUG", "") == "true",
-		WhatsAppDBPath: getEnv("WHATSAPP_DB_PATH", "whatsapp.db"),
+		Port:             getEnv("PORT", "8080"),
+		Env:              getEnv("ENV", "development"),
+		Provider:         getEnv("PROVIDER", "gemini"),
+		LoyverseAPIKey:   getEnv("LOYVERSE_TOKEN", ""),
+		GeminiAPIKey:     getEnv("GEMINI_API_KEY", ""),
+		OpenAIAPIKey:     getEnv("OPENAI_API_KEY", ""),
+		OpenAIBaseURL:    getEnv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+		SuppliersFile:    getEnv("SUPPLIERS_FILE", "suppliers.json"),
+		Debug:            getEnv("DEBUG", "") == "true",
+		WhatsAppDBPath:   getEnv("WHATSAPP_DB_PATH", "whatsapp.db"),
 		AllowedNumbers:   parseCSV(getEnv("ALLOWED_NUMBERS", "")),
 		WhatsAppGroupJID: getEnv("WHATSAPP_GROUP_JID", ""),
 	}
@@ -44,8 +49,13 @@ func Load() (*Config, error) {
 	if cfg.LoyverseAPIKey == "" {
 		return nil, fmt.Errorf("LOYVERSE_TOKEN es requerido")
 	}
-	if cfg.GeminiAPIKey == "" {
-		return nil, fmt.Errorf("GEMINI_API_KEY es requerido")
+
+	// Validación estricta por proveedor
+	if cfg.Provider == "gemini" && cfg.GeminiAPIKey == "" {
+		return nil, fmt.Errorf("GEMINI_API_KEY es requerido para provider gemini")
+	}
+	if cfg.Provider == "openai" && cfg.OpenAIAPIKey == "" {
+		return nil, fmt.Errorf("OPENAI_API_KEY es requerido para provider openai")
 	}
 
 	return cfg, nil

@@ -15,11 +15,11 @@ import (
 	"blue/internal/loyverse"
 	"blue/internal/whatsapp"
 
+	"github.com/sashabaranov/go-openai"
 	"google.golang.org/genai"
 )
 
 func main() {
-	// Debug logs van a stderr, chat limpio a stdout.
 	log.SetOutput(os.Stderr)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -30,15 +30,25 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	geminiClient, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:  cfg.GeminiAPIKey,
-		Backend: genai.BackendGeminiAPI,
-	})
-	if err != nil {
-		log.Fatalf("gemini client: %v", err)
+	var llm agent.LLM
+
+	if cfg.Provider == "openai" {
+		apiConfig := openai.DefaultConfig(cfg.OpenAIAPIKey)
+		apiConfig.BaseURL = cfg.OpenAIBaseURL
+		openaiClient := openai.NewClientWithConfig(apiConfig)
+		// Usamos la versión actual soportada por Groq
+		llm = agent.NewOpenAILLM(openaiClient, "llama-3.3-70b-versatile")
+	} else {
+		geminiClient, err := genai.NewClient(ctx, &genai.ClientConfig{
+			APIKey:  cfg.GeminiAPIKey,
+			Backend: genai.BackendGeminiAPI,
+		})
+		if err != nil {
+			log.Fatalf("gemini client: %v", err)
+		}
+		llm = agent.NewGeminiLLM(geminiClient, "gemini-2.5-flash")
 	}
 
-	geminiLLM := agent.NewGeminiLLM(geminiClient, "gemini-2.5-flash")
 	loyClient := loyverse.NewClient(http.DefaultClient, cfg.LoyverseAPIKey)
 
 	suppliers, err := agent.LoadSuppliers(cfg.SuppliersFile)
@@ -47,14 +57,20 @@ func main() {
 		suppliers = make(map[string][]string)
 	}
 
-	lumi := agent.New(geminiLLM, loyClient, suppliers, agent.WithDebug(cfg.Debug))
+	lumi := agent.New(llm, loyClient, suppliers, agent.WithDebug(cfg.Debug))
 
 	if cfg.Debug {
 		log.Println("[DEBUG] modo debug activado — logs en stderr")
 		log.Printf("[DEBUG] LOYVERSE_TOKEN: %s...%s (%d chars)",
 			cfg.LoyverseAPIKey[:4], cfg.LoyverseAPIKey[len(cfg.LoyverseAPIKey)-4:], len(cfg.LoyverseAPIKey))
-		log.Printf("[DEBUG] GEMINI_API_KEY: %s...%s (%d chars)",
-			cfg.GeminiAPIKey[:4], cfg.GeminiAPIKey[len(cfg.GeminiAPIKey)-4:], len(cfg.GeminiAPIKey))
+		
+		if cfg.Provider == "openai" {
+			log.Printf("[DEBUG] OPENAI_API_KEY (Groq): %s...%s (%d chars)",
+				cfg.OpenAIAPIKey[:4], cfg.OpenAIAPIKey[len(cfg.OpenAIAPIKey)-4:], len(cfg.OpenAIAPIKey))
+		} else {
+			log.Printf("[DEBUG] GEMINI_API_KEY: %s...%s (%d chars)",
+				cfg.GeminiAPIKey[:4], cfg.GeminiAPIKey[len(cfg.GeminiAPIKey)-4:], len(cfg.GeminiAPIKey))
+		}
 		log.Printf("[DEBUG] SuppliersFile: %s (%d proveedores cargados)", cfg.SuppliersFile, len(suppliers))
 	}
 
@@ -117,7 +133,6 @@ func runCLI(ctx context.Context, lumi *agent.Agent) {
 			continue
 		}
 
-		// Formatear respuesta con indentación limpia.
 		lines := strings.Split(response, "\n")
 		for _, line := range lines {
 			fmt.Printf("  lumi → %s\n", line)
