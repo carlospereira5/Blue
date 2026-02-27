@@ -56,12 +56,14 @@ func (b *Bot) handleEvent(evt interface{}) {
 	log.Printf("[whatsapp] mensaje de %s: %s", msg.Info.Sender, text)
 
 	// Goroutine para no bloquear el event loop — agent.Chat() tarda 3-5s.
-	go b.processMessage(msg.Info.Chat, text)
+	// Pasamos el JID del sender como identificador único para la sesión.
+	go b.processMessage(msg.Info.Chat, msg.Info.Sender.String(), text)
 }
 
-func (b *Bot) processMessage(chat types.JID, text string) {
+func (b *Bot) processMessage(chat types.JID, senderID string, text string) {
 	ctx := context.Background()
-	response, err := b.agent.Chat(ctx, text)
+	// Pasamos el senderID para mantener el contexto de la conversación.
+	response, err := b.agent.Chat(ctx, senderID, text)
 	if err != nil {
 		log.Printf("[whatsapp] error en Chat: %v", err)
 		b.sendReply(ctx, chat, "Error procesando tu consulta. Intenta de nuevo.")

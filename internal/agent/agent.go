@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"blue/internal/loyverse"
 )
@@ -12,10 +13,11 @@ import (
 // Agent es el cerebro del chatbot Lumi. Conecta un LLM con Loyverse
 // usando function calling para responder consultas en lenguaje natural.
 type Agent struct {
-	llm       LLM
-	loyverse  loyverse.Reader
-	suppliers map[string][]string
-	debug     bool
+	llm            LLM
+	loyverse       loyverse.Reader
+	suppliers      map[string][]string
+	debug          bool
+	sessionManager *SessionManager
 }
 
 // Option configura el Agent.
@@ -36,6 +38,8 @@ func New(llm LLM, loy loyverse.Reader, suppliers map[string][]string, opts ...Op
 	for _, opt := range opts {
 		opt(a)
 	}
+	// Inicializamos el SessionManager pasando el a.debug resultante de las opciones
+	a.sessionManager = NewSessionManager(30*time.Minute, a.debug)
 	return a
 }
 
@@ -47,15 +51,16 @@ func (a *Agent) debugLog(format string, args ...any) {
 
 // Chat envía un mensaje al modelo, ejecuta el loop de function calling,
 // y retorna la respuesta de texto final.
-// Cada llamada a Chat() es independiente (no se persiste historia).
-func (a *Agent) Chat(ctx context.Context, message string) (string, error) {
-	a.debugLog(">>> mensaje usuario: %q", message)
+// Utiliza sessionManager para mantener el contexto multi-turno por userID.
+func (a *Agent) Chat(ctx context.Context, userID, message string) (string, error) {
+	a.debugLog(">>> mensaje usuario (%s): %q", userID, message)
 
-	session, err := a.llm.NewSession(ctx, buildSystemPrompt(), lumiTools())
+	// Obtener sesión existente o crear una nueva para este userID
+	session, err := a.sessionManager.GetOrCreate(ctx, userID, a.llm, buildSystemPrompt(), lumiTools())
 	if err != nil {
-		return "", fmt.Errorf("creating session: %w", err)
+		return "", fmt.Errorf("obteniendo sesión: %w", err)
 	}
-	a.debugLog("sesión LLM creada")
+	a.debugLog("sesión LLM lista para %s", userID)
 
 	text, calls, err := session.Send(ctx, message)
 	if err != nil {

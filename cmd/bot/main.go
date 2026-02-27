@@ -20,6 +20,7 @@ import (
 )
 
 func main() {
+	// Debug logs van a stderr, chat limpio a stdout.
 	log.SetOutput(os.Stderr)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -36,7 +37,6 @@ func main() {
 		apiConfig := openai.DefaultConfig(cfg.OpenAIAPIKey)
 		apiConfig.BaseURL = cfg.OpenAIBaseURL
 		openaiClient := openai.NewClientWithConfig(apiConfig)
-		// Usamos la versión actual soportada por Groq
 		llm = agent.NewOpenAILLM(openaiClient, "llama-3.3-70b-versatile")
 	} else {
 		geminiClient, err := genai.NewClient(ctx, &genai.ClientConfig{
@@ -65,7 +65,7 @@ func main() {
 			cfg.LoyverseAPIKey[:4], cfg.LoyverseAPIKey[len(cfg.LoyverseAPIKey)-4:], len(cfg.LoyverseAPIKey))
 		
 		if cfg.Provider == "openai" {
-			log.Printf("[DEBUG] OPENAI_API_KEY (Groq): %s...%s (%d chars)",
+			log.Printf("[DEBUG] OPENAI_API_KEY: %s...%s (%d chars)",
 				cfg.OpenAIAPIKey[:4], cfg.OpenAIAPIKey[len(cfg.OpenAIAPIKey)-4:], len(cfg.OpenAIAPIKey))
 		} else {
 			log.Printf("[DEBUG] GEMINI_API_KEY: %s...%s (%d chars)",
@@ -127,12 +127,14 @@ func runCLI(ctx context.Context, lumi *agent.Agent) {
 		}
 
 		fmt.Println()
-		response, chatErr := lumi.Chat(ctx, input)
+		// Pasamos un ID hardcodeado para mantener el estado en modo interactivo
+		response, chatErr := lumi.Chat(ctx, "cli-user", input)
 		if chatErr != nil {
 			fmt.Printf("  ⚠ Error: %v\n\n", chatErr)
 			continue
 		}
 
+		// Formatear respuesta con indentación limpia.
 		lines := strings.Split(response, "\n")
 		for _, line := range lines {
 			fmt.Printf("  lumi → %s\n", line)
