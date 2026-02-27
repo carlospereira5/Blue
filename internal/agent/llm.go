@@ -36,7 +36,9 @@ type Session interface {
 	SendToolResults(ctx context.Context, results []ToolResult) (text string, calls []ToolCall, err error)
 }
 
-// LLM crea sesiones de conversación.
+// LLM crea sesiones de conversación y transcribe audio.
 type LLM interface {
 	NewSession(ctx context.Context, systemPrompt string, tools []ToolDef) (Session, error)
+	// Transcribe convierte datos de audio crudo en texto.
+	Transcribe(ctx context.Context, audioData []byte) (string, error)
 }

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -16,6 +17,23 @@ type OpenAILLM struct {
 
 func NewOpenAILLM(client *openai.Client, model string) *OpenAILLM {
 	return &OpenAILLM{client: client, model: model}
+}
+
+// Transcribe envía el audio OGG de WhatsApp al endpoint Whisper de Groq.
+func (o *OpenAILLM) Transcribe(ctx context.Context, audioData []byte) (string, error) {
+	req := openai.AudioRequest{
+		Model:    "whisper-large-v3-turbo", // Modelo ultrarrápido de Groq para audio
+		Reader:   bytes.NewReader(audioData),
+		FilePath: "voice_note.ogg", // Indispensable para que la API parsee el codec Opus de WhatsApp
+		Format:   openai.AudioResponseFormatText,
+	}
+
+	resp, err := o.client.CreateTranscription(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("openai transcription: %w", err)
+	}
+
+	return resp.Text, nil
 }
 
 func (o *OpenAILLM) NewSession(ctx context.Context, systemPrompt string, tools []ToolDef) (Session, error) {
@@ -35,9 +53,6 @@ func (o *OpenAILLM) NewSession(ctx context.Context, systemPrompt string, tools [
 			"properties": props,
 		}
 
-		// FIX: Si Required es nil o está vacío, lo omitimos del mapa. 
-		// Esto evita que el marshaler de Go genere un "null" literal que rompe 
-		// la validación estricta de JSON Schema (Draft 2020-12) en la API de Groq.
 		if len(t.Required) > 0 {
 			schema["required"] = t.Required
 		}
@@ -57,7 +72,6 @@ func (o *OpenAILLM) NewSession(ctx context.Context, systemPrompt string, tools [
 		}
 	}
 
-	// Preasignación de capacidad para evitar fragmentación de memoria en el heap (slice growth).
 	messages := make([]openai.ChatCompletionMessage, 0, 16)
 	messages = append(messages, openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleSystem,
@@ -69,7 +83,7 @@ func (o *OpenAILLM) NewSession(ctx context.Context, systemPrompt string, tools [
 		model:           o.model,
 		messages:        messages,
 		tools:           oTools,
-		lastToolCallIDs: nil,
+		lastToolCallIDs: make(map[string]string),
 	}, nil
 }
 
@@ -78,7 +92,7 @@ type openAISession struct {
 	model           string
 	messages        []openai.ChatCompletionMessage
 	tools           []openai.Tool
-	lastToolCallIDs []string // IDs por índice, paralelo a []ToolCall retornado
+	lastToolCallIDs map[string]string
 }
 
 func (s *openAISession) Send(ctx context.Context, message string) (string, []ToolCall, error) {
@@ -90,20 +104,16 @@ func (s *openAISession) Send(ctx context.Context, message string) (string, []Too
 }
 
 func (s *openAISession) SendToolResults(ctx context.Context, results []ToolResult) (string, []ToolCall, error) {
-	for i, r := range results {
+	for _, r := range results {
 		contentBytes, err := json.Marshal(r.Result)
 		if err != nil {
 			return "", nil, fmt.Errorf("marshaling tool result: %w", err)
-		}
-		toolCallID := ""
-		if i < len(s.lastToolCallIDs) {
-			toolCallID = s.lastToolCallIDs[i]
 		}
 		s.messages = append(s.messages, openai.ChatCompletionMessage{
 			Role:       openai.ChatMessageRoleTool,
 			Content:    string(contentBytes),
 			Name:       r.Name,
-			ToolCallID: toolCallID,
+			ToolCallID: s.lastToolCallIDs[r.Name],
 		})
 	}
 	return s.do(ctx)
@@ -127,14 +137,12 @@ func (s *openAISession) do(ctx context.Context) (string, []ToolCall, error) {
 	}
 
 	msg := resp.Choices[0].Message
-	// Almacenar respuesta del asistente para mantener contexto en memoria
 	s.messages = append(s.messages, msg)
 
 	if len(msg.ToolCalls) > 0 {
 		toolCalls := make([]ToolCall, len(msg.ToolCalls))
-		s.lastToolCallIDs = make([]string, len(msg.ToolCalls))
 		for i, tc := range msg.ToolCalls {
-			s.lastToolCallIDs[i] = tc.ID
+			s.lastToolCallIDs[tc.Function.Name] = tc.ID
 
 			var args map[string]any
 			if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {

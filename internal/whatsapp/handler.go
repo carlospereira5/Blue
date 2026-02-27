@@ -17,33 +17,23 @@ func (b *Bot) handleEvent(evt interface{}) {
 		return
 	}
 
-	// Ignorar mensajes offline (buffered durante desconexión).
 	if time.Since(msg.Info.Timestamp) > 30*time.Second {
 		log.Printf("[whatsapp] mensaje offline ignorado (%s)", msg.Info.Timestamp.Format(time.RFC3339))
 		return
 	}
 
-	// --- Modo grupo vs DM ---
 	if b.groupJID.IsEmpty() {
-		// Discovery mode: logear JIDs de grupos, procesar solo DMs.
 		if msg.Info.IsGroup {
 			log.Printf("[whatsapp] [discovery] grupo detectado: %s", msg.Info.Chat)
 			return
 		}
 	} else {
-		// Group mode: SOLO mensajes del grupo configurado.
 		if !msg.Info.IsGroup || msg.Info.Chat != b.groupJID {
 			return
 		}
 	}
 
-	// Ignorar mensajes propios (crítico en grupos).
 	if msg.Info.IsFromMe {
-		return
-	}
-
-	text := extractText(msg)
-	if text == "" {
 		return
 	}
 
@@ -53,16 +43,47 @@ func (b *Bot) handleEvent(evt interface{}) {
 		return
 	}
 
-	log.Printf("[whatsapp] mensaje de %s: %s", msg.Info.Sender, text)
+	// Goroutine independiente para manejar I/O de red sin bloquear whatsmeow
+	go func() {
+		ctx := context.Background()
+		var text string
 
-	// Goroutine para no bloquear el event loop — agent.Chat() tarda 3-5s.
-	// Pasamos el JID del sender como identificador único para la sesión.
-	go b.processMessage(msg.Info.Chat, msg.Info.Sender.String(), text)
+		// Verificamos si es una nota de voz/audio
+		if audioMsg := msg.Message.GetAudioMessage(); audioMsg != nil {
+			log.Printf("[whatsapp] descargando nota de voz de %s...", msg.Info.Sender)
+			
+			// FIX: Pasamos 'ctx' como primer argumento para satisfacer la firma actual de whatsmeow
+			audioData, err := b.client.Download(ctx, audioMsg)
+			if err != nil {
+				log.Printf("[whatsapp] error descargando audio: %v", err)
+				return
+			}
+			
+			// Enviamos los bytes crudos (OGG) a Groq
+			text, err = b.agent.TranscribeAudio(ctx, audioData)
+			if err != nil {
+				log.Printf("[whatsapp] error transcribiendo audio: %v", err)
+				b.sendReply(ctx, msg.Info.Chat, "Lo siento, tuve un problema al procesar tu nota de voz 🎙️❌")
+				return
+			}
+			
+			log.Printf("[whatsapp] audio transcrito (%s): %q", msg.Info.Sender, text)
+		} else {
+			// Es un mensaje de texto normal
+			text = extractText(msg)
+		}
+
+		// Si el texto final está vacío (ya sea porque no había texto o el audio estaba en silencio) salimos
+		if text == "" {
+			return
+		}
+
+		b.processMessage(msg.Info.Chat, msg.Info.Sender.String(), text)
+	}()
 }
 
 func (b *Bot) processMessage(chat types.JID, senderID string, text string) {
 	ctx := context.Background()
-	// Pasamos el senderID para mantener el contexto de la conversación.
 	response, err := b.agent.Chat(ctx, senderID, text)
 	if err != nil {
 		log.Printf("[whatsapp] error en Chat: %v", err)
@@ -93,17 +114,14 @@ func extractText(msg *events.Message) string {
 
 func (b *Bot) isAllowed(sender types.JID) bool {
 	if len(b.allowed) == 0 {
-		return true // Sin whitelist = todos permitidos.
+		return true
 	}
 
-	// Comparar sin device ID para que matchee cualquier dispositivo del mismo número.
 	clean := types.NewJID(sender.User, sender.Server)
 	if b.allowed[clean] {
 		return true
 	}
 
-	// WhatsApp puede mandar el sender como LID (@lid) en vez de número (@s.whatsapp.net).
-	// Resolvemos LID → número de teléfono usando el store de whatsmeow.
 	if sender.Server == types.HiddenUserServer {
 		pn, err := b.client.Store.GetAltJID(context.Background(), sender)
 		if err == nil && !pn.IsEmpty() {

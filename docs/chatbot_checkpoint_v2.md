@@ -71,3 +71,47 @@ A partir de esta versión, Lumi cuenta con las siguientes capacidades integradas
 | --------- | -------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | 🔴 Alta   | Planificación Blue Phase 2 | Iniciar el diseño del esquema de la base de datos PostgreSQL, el motor de transacciones e inventario FIFO.    |
 | 🟡 Media  | Test en Producción real    | Dejar el kiosco operando exclusivamente con Lumi durante 2 días para recabar feedback de los administradores. |
+
+## [2026-02-27] Sesión: Decisión Arquitectónica — Service Layer y Macro-Tools (Composability)
+
+### Qué se discutió y decidió
+
+Se evaluó la posibilidad de migrar a un enfoque _ReAct_ puro (exponer todos los endpoints crudos de Loyverse como herramientas individuales para que el LLM los combine). **Esta idea fue descartada por razones críticas de infraestructura:**
+
+1. **Context Window & RAM:** Enviar miles de recibos crudos (megabytes de JSON) saturaría el contexto del LLM y la memoria del proceso Go.
+2. **Determinismo:** Los LLMs son probabilísticos y propensos a alucinaciones matemáticas al sumar miles de números de punto flotante.
+3. **Latencia y Rate Limits:** La paginación manejada por el LLM multiplicaría las llamadas HTTP, rompiendo los límites de Loyverse y disparando la latencia del bot.
+
+**Decisión final:** Se adoptará un patrón de **Componibilidad (Composability) basado en 3 niveles de abstracción**. Go manejará todo el I/O pesado y las matemáticas (CPU-bound) de forma determinista, mientras que el LLM solo interactuará con "Macro-tools" altamente eficientes.
+
+### La Nueva Arquitectura (3 Niveles)
+
+- **Nivel 1: Data Fetchers & Cachers (I/O Bound):**
+  - Manejan la red, paginación de Loyverse y memoria local.
+  - _Ejemplo clave:_ `GetCatalogIndex()`. Un caché en memoria con `sync.RWMutex` que guarda el catálogo de productos y categorías para evitar peticiones repetitivas.
+- **Nivel 2: Core Aggregators (CPU Bound):**
+  - Funciones puras en Go que cruzan datos en memoria RAM y aplican matemática exacta.
+  - _Ejemplos:_ `CalculateSalesMetrics()`, `AggregateItemSales()`.
+- **Nivel 3: Macro-Tools (LLM Interfaces):**
+  - Orquestadores ligeros expuestos al LLM. El LLM detecta la intención, extrae parámetros y llama a la macro-tool, la cual ensambla internamente los Niveles 1 y 2.
+  - _Futuras tools:_ `get_sales_by_category`, `get_inventory_valuation`, `get_cash_flow_summary`.
+
+### Próximos pasos inmediatos (Próxima Sesión)
+
+| Prioridad | Tarea                           | Descripción                                                                                                                                                                                          |
+| --------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🔴 Alta   | Implementar `GetCatalogIndex()` | Crear `internal/agent/cache.go` para implementar un caché _Singleton_ en memoria que almacene `Items` y `Categories`. Esto eliminará la latencia actual al buscar nombres de productos y categorías. |
+| 🟡 Media  | Refactorizar Handlers Actuales  | Modificar los handlers existentes en `internal/agent/handlers.go` para que consuman el nuevo caché de catálogo en lugar de hacer fetch a la red en cada llamada.                                     |
+| 🔵 Baja   | Nuevas Macro-Tools              | Diseñar e implementar `get_inventory_valuation` usando los nuevos _building blocks_.                                                                                                                 |
+
+## [2026-02-27] Sesión: Procesamiento de Notas de Voz (Voice-to-Text) y Cierre de Fase 1
+
+### Qué se hizo
+
+Se implementó con éxito el procesamiento nativo de audios de WhatsApp. En lugar de forzar a los usuarios a escribir, Lumi ahora captura las notas de voz (archivos OGG), las descarga a la memoria RAM e invoca el modelo `whisper-large-v3-turbo` de Groq.
+
+- **Velocidad:** La transcripción tarda en promedio ~1 segundo al enviar los bytes crudos a la LPU de Groq.
+- **Arquitectura:** Se envuelve la descarga de la red y la llamada al LLM en una _goroutine_ independiente dentro del `handleEvent` de WhatsApp para garantizar I/O no bloqueante.
+- **Resultados:** El LLM transcribe con alta precisión y procesa preguntas orales redundantes o complejas de forma impecable.
+
+Con este hito, se da por finalizada y validada en producción toda la Fase 1 del sistema (Lumi NLU Bot).

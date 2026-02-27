@@ -118,3 +118,9 @@ func toGeminiType(t string) genai.Type {
 		return genai.TypeString
 	}
 }
+
+// Transcribe implementa la interfaz LLM. Como estamos usando Groq en producción, 
+// dejamos este método preparado por si decides volver a Gemini nativo.
+func (g *GeminiLLM) Transcribe(ctx context.Context, audioData []byte) (string, error) {
+	return "", fmt.Errorf("transcripción de audio no implementada para Gemini en esta versión")
+}

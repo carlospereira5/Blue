@@ -38,7 +38,6 @@ func New(llm LLM, loy loyverse.Reader, suppliers map[string][]string, opts ...Op
 	for _, opt := range opts {
 		opt(a)
 	}
-	// Inicializamos el SessionManager pasando el a.debug resultante de las opciones
 	a.sessionManager = NewSessionManager(30*time.Minute, a.debug)
 	return a
 }
@@ -49,13 +48,16 @@ func (a *Agent) debugLog(format string, args ...any) {
 	}
 }
 
+// TranscribeAudio utiliza el LLM subyacente para pasar una nota de voz a texto.
+func (a *Agent) TranscribeAudio(ctx context.Context, audioData []byte) (string, error) {
+	return a.llm.Transcribe(ctx, audioData)
+}
+
 // Chat envía un mensaje al modelo, ejecuta el loop de function calling,
 // y retorna la respuesta de texto final.
-// Utiliza sessionManager para mantener el contexto multi-turno por userID.
 func (a *Agent) Chat(ctx context.Context, userID, message string) (string, error) {
 	a.debugLog(">>> mensaje usuario (%s): %q", userID, message)
 
-	// Obtener sesión existente o crear una nueva para este userID
 	session, err := a.sessionManager.GetOrCreate(ctx, userID, a.llm, buildSystemPrompt(), lumiTools())
 	if err != nil {
 		return "", fmt.Errorf("obteniendo sesión: %w", err)
