@@ -238,7 +238,7 @@ func TestDiag_04_ReceiptsForSpecificDate(t *testing.T) {
 		total += r.TotalMoney
 		if i < 5 { // solo imprimir primeros 5
 			printField(fmt.Sprintf("  → receipt[%d]", i),
-				fmt.Sprintf("#%s $%.2f %s", r.ReceiptNumber, r.TotalMoney, r.CreatedAt.In(art).Format("15:04")))
+				fmt.Sprintf("#%s $%.2f %s", r.ReceiptNumber, r.TotalMoney, r.CreatedAt.In(chLoc).Format("15:04")))
 		}
 	}
 	if len(receipts) > 5 {
