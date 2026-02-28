@@ -128,16 +128,16 @@ func TestDiag_02_LoyverseConnection(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // DIAG 3: Parseo de fechas y rangos UTC
-// Verifica: que "2026-02-21" en Argentina se traduce al rango UTC correcto.
-// Argentina = UTC-3, entonces:
-//   2026-02-21 00:00 ART = 2026-02-21 03:00 UTC
-//   2026-02-21 23:59:59 ART = 2026-02-22 02:59:59 UTC
+// Verifica: que "2026-02-21" en Chile se traduce al rango UTC correcto.
+// Chile en verano (CLST) = UTC-3, entonces:
+//   2026-02-21 00:00 CLT = 2026-02-21 03:00 UTC
+//   2026-02-21 23:59:59 CLT = 2026-02-22 02:59:59 UTC
 // ---------------------------------------------------------------------------
 func TestDiag_03_DateParsing(t *testing.T) {
 	skipIfNoDebug(t)
 	printHeader("DIAG 3: Parseo de fechas y rangos UTC")
 
-	art, _ := time.LoadLocation("America/Argentina/Buenos_Aires")
+	chLoc, _ := time.LoadLocation("America/Santiago")
 
 	tests := []struct {
 		label     string
@@ -166,8 +166,8 @@ func TestDiag_03_DateParsing(t *testing.T) {
 		printStep("", tt.label)
 
 		// Simular lo que hace parseDateRange
-		since, _ := time.ParseInLocation("2006-01-02", tt.startDate, art)
-		until, _ := time.ParseInLocation("2006-01-02", tt.endDate, art)
+		since, _ := time.ParseInLocation("2006-01-02", tt.startDate, chLoc)
+		until, _ := time.ParseInLocation("2006-01-02", tt.endDate, chLoc)
 		until = until.Add(24*time.Hour - time.Second)
 
 		sinceUTC := since.UTC()
@@ -175,8 +175,8 @@ func TestDiag_03_DateParsing(t *testing.T) {
 
 		printField("input start_date", tt.startDate)
 		printField("input end_date", tt.endDate)
-		printField("since (ART)", since.Format(time.RFC3339))
-		printField("until (ART)", until.Format(time.RFC3339))
+		printField("since (CLT)", since.Format(time.RFC3339))
+		printField("until (CLT)", until.Format(time.RFC3339))
 		printField("since (UTC)", sinceUTC.Format(time.RFC3339))
 		printField("until (UTC)", untilUTC.Format(time.RFC3339))
 		printField("want since UTC", tt.wantStart)
@@ -217,9 +217,9 @@ func TestDiag_04_ReceiptsForSpecificDate(t *testing.T) {
 	client := loyverse.NewClient(http.DefaultClient, cfg.LoyverseAPIKey)
 	ctx := context.Background()
 
-	art, _ := time.LoadLocation("America/Argentina/Buenos_Aires")
-	since, _ := time.ParseInLocation("2006-01-02", "2026-02-21", art)
-	until, _ := time.ParseInLocation("2006-01-02", "2026-02-21", art)
+	chLoc, _ := time.LoadLocation("America/Santiago")
+	since, _ := time.ParseInLocation("2006-01-02", "2026-02-21", chLoc)
+	until, _ := time.ParseInLocation("2006-01-02", "2026-02-21", chLoc)
 	until = until.Add(24*time.Hour - time.Second)
 
 	sinceUTC := since.UTC()

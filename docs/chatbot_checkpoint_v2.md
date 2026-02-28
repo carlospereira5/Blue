@@ -1,31 +1,85 @@
-# Lumi — Chatbot Checkpoint V2
+# Blue — Project Checkpoint V2
 
-## Estado Actual de la Arquitectura (Fase 1.2)
+## Estado Actual de la Arquitectura (v2 — Blue System)
 
-Lumi es la interfaz NLU sin estado del kiosco conectada a WhatsApp y Loyverse.
+### Naming
 
-### Decisiones Core Implementadas
+| Nombre | Rol | Paquete |
+|--------|-----|---------|
+| **Blue** | El sistema completo (Go module, repo, proyecto) | `blue` (module root) |
+| **Aria** | El agente — la cara. Maneja todo el I/O: WhatsApp, LLMs, Loyverse, CLI. | `internal/agent/`, `internal/whatsapp/` |
+| **Cortex** | El cerebro — motor de lógica de negocio. Funciones puras, sin I/O, sin side effects. | `internal/cortex/` |
 
-1. **NLU Layer**: Migrado a Groq (`llama-3.3-70b-versatile`) vía la interfaz `LLM` con el SDK de OpenAI, mitigando los _rate limits_ de Gemini. El manejo de estado y mitigación del validador estricto JSON Schema están implementados (`internal/agent/openai.go`).
-2. **UX / Formato**: El `system_prompt` está optimizado para WhatsApp (negritas `*`, cursivas `_`, pirámide invertida y comparativas temporales).
-3. **Proveedores**: `suppliers.json` está poblado con las 17 categorías/proveedores reales del kiosco.
+### Visión General
+
+Aria es la cara (I/O: WhatsApp + LLM + Loyverse). Cortex es el cerebro (lógica de negocio pura). Ambos corren en el mismo binario Go como paquetes internos separados.
+
+La base de datos local es la **fuente de verdad** — un sync service periódico (~2 min) replica los datos de Loyverse a PostgreSQL (producción) o SQLite (Termux/Android). Aria **nunca consulta Loyverse en tiempo real** para queries de negocio; solo Cortex lee de la DB local.
+
+### Los 3 Dominios Funcionales de Blue
+
+1. **Administración de Loyverse (POS)**: Aria como power-admin CLI (Bubble Tea/Charm) — bulk photo upload, estandarizar nombres, detectar campos faltantes, CRUD de productos/categorías. Solo para el administrador.
+2. **Asistente Operativo (día a día)**: Digitalización de facturas (OCR/AI), ajustes de inventario (consumo personal, pérdidas), tracking de gastos y deudas con cuotas, consultas de ventas/stock.
+3. **Inteligencia Proactiva (Cortex)**: Demand forecasting para pedidos a proveedores, alertas de dead stock, cálculo de velocidad de venta, reportes automáticos de balances, delegación de tareas, comunicaciones automatizadas (emails/WhatsApp a proveedores).
+
+Cortex funciona como una **colección de funciones puras independientes** (analogía: Lambda functions). Cada función es testeable, componible, y se puede agregar sin tocar el resto del sistema.
+
+### Decisiones Arquitectónicas (Definitivas)
+
+1. **Mismo binario, paquetes separados**: Aria y Cortex NO son microservicios. Son paquetes `internal/` dentro del mismo proceso Go. Zero overhead de red.
+2. **DB como source of truth (sync periódico)**: El sync service corre en background. Las queries siempre van contra la DB local. Dato puede estar hasta N minutos stale (aceptable para kiosco).
+3. **Dual DB support**: SQLite (no CGO) para Termux/Android. PostgreSQL para servidor dedicado. El paquete `db` expone una interfaz.
+4. **No CGO (non-negotiable)**: `CGO_ENABLED=0` para cross-compilation a Android/Termux.
+5. **NLU Layer**: Groq (`llama-3.3-70b-versatile`) como primario, Gemini como fallback.
+6. **Proveedores**: `suppliers.json` con 17 proveedores reales del kiosco.
+
+### Estructura de Paquetes (Target)
+
+```
+cmd/
+  bot/                → Entry point: WhatsApp bot + CLI mode
+  admin/              → Entry point: Bubble Tea CLI para administración (futuro)
+internal/
+  config/             → Config desde env vars (Infisical)
+  loyverse/           → Cliente HTTP puro (I/O, sin lógica)
+  agent/              → LLM + tool definitions + macro-tools (Aria)
+  whatsapp/           → whatsmeow wrapper (Aria)
+  cortex/             → Lógica de negocio: funciones puras, sin I/O
+  db/                 → Data access layer: CRUD, interfaz DB-agnostic
+  sync/               → Servicio de sync Loyverse → DB (goroutine background)
+```
 
 ### Estado de los Módulos
 
-| Módulo              | Sistema    | Estado                                          |
-| ------------------- | ---------- | ----------------------------------------------- |
-| Loyverse API client | Compartido | ✅ Completo — 34 tests                          |
-| Config              | Compartido | ✅ Completo — Soporta Groq/OpenAI               |
-| Agent + tools       | Lumi       | ✅ Funcional — Groq JSON schema fixing aplicado |
-| CLI & WhatsApp Bot  | Lumi       | ✅ Funcional                                    |
+| Módulo                   | Componente | Estado                                        |
+| ------------------------ | ---------- | --------------------------------------------- |
+| Loyverse API client      | Compartido | ✅ Completo — 34 tests (read endpoints)       |
+| Config                   | Compartido | ✅ Completo                                   |
+| LLM client (Groq/Gemini) | Aria      | ✅ Completo — JSON schema strict fix          |
+| Agent + macro-tools      | Aria       | ✅ v1 funcional — pendiente refactor a Cortex |
+| Multi-turn memory        | Aria       | ✅ Completo — SessionManager con TTL          |
+| Retry/Resilience         | Aria       | ✅ Completo — exponential backoff decorator   |
+| Voice-to-text (Whisper)  | Aria       | ✅ Completo                                   |
+| WhatsApp bot             | Aria       | ✅ Completo                                   |
+| DB package (interfaz)    | Compartido | 🔴 No iniciado                               |
+| Sync service             | Compartido | 🔴 No iniciado                               |
+| Cortex business logic    | Cortex     | 🔴 No iniciado                               |
+| Cortex: FIFO inventory   | Cortex     | 🔴 No iniciado                               |
+| Cortex: Accounting       | Cortex     | 🔴 No iniciado                               |
+| Cortex: Demand forecast  | Cortex     | 🔴 No iniciado                               |
+| Admin CLI (Bubble Tea)   | Aria       | 🔴 No iniciado                               |
+| Loyverse write endpoints | Compartido | 🔴 No iniciado                               |
+| Web dashboard            | Blue       | 🔴 No iniciado (fase final)                  |
 
-### Próximos Pasos (Fase B)
+### Próximos Pasos Inmediatos
 
-| Prioridad | Tarea                 | Descripción                                                                                            |
-| --------- | --------------------- | ------------------------------------------------------------------------------------------------------ |
-| 🔴 Alta   | Multi-turn Memory     | Implementar `SessionManager` en memoria con TTL para que Lumi recuerde el contexto entre mensajes.     |
-| 🔴 Alta   | Retry Logic           | Envolver el `do()` del NLU en un _Decorator_ para reintentar (Backoff) fallos de Groq (HTTP 429, 503). |
-| 🔵 Baja   | Blue Engine (Phase 2) | Planificar esquema SQL y FIFO.                                                                         |
+| Prioridad | Tarea                               | Descripción                                                                                               |
+| --------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| 🔴 Alta   | Diseñar schema DB (mirror Loyverse) | Tablas para receipts, items, categories, shifts, inventory, payment_types. UPSERTs para sync incremental. |
+| 🔴 Alta   | Implementar paquete `db`            | Interfaz + implementación SQLite (no CGO). CRUD puro, sin lógica.                                        |
+| 🔴 Alta   | Implementar paquete `sync`          | Goroutine background, usa `loyverse/` para popular la DB. Incremental vía `updated_since`.                |
+| 🔴 Alta   | Implementar paquete `cortex`        | Extraer lógica de `handlers.go` a funciones puras.                                                        |
+| 🟡 Media  | Refactorizar macro-tools            | Handlers en `agent/` delegan a Cortex → DB en vez de Loyverse directo.                                   |
 
 ## [2026-02-26] Sesión: Fase B Completada — Memoria Multi-turno y Tolerancia a Fallos (Lumi v1.2)
 
@@ -37,7 +91,7 @@ Implementación exitosa de la "Fase B" de la hoja de ruta. Se agregó soporte de
 
 A partir de esta versión, Lumi cuenta con las siguientes capacidades integradas:
 
-1. **NLU de Baja Latencia y Contexto Relativo:** Potenciado por `llama-3.3-70b-versatile` vía Groq, Lumi comprende el lenguaje natural rioplatense y resuelve fechas relativas ("hoy", "ayer", "el mes pasado") inyectando la zona horaria UTC-3 (Argentina/Buenos Aires) dinámicamente.
+1. **NLU de Baja Latencia y Contexto Relativo:** Potenciado por `llama-3.3-70b-versatile` vía Groq, Lumi comprende el lenguaje natural y resuelve fechas relativas ("hoy", "ayer", "el mes pasado") inyectando la zona horaria de Chile (`America/Santiago`) dinámicamente.
 2. **Memoria Multi-turno:** Mantiene el hilo de la conversación activo. Permite al usuario hacer preguntas de seguimiento (ej. "Y la semana pasada?", "¿Eso es en el mes?") sin necesidad de repetir la intención o el sujeto.
 3. **Razonamiento Comparativo:** Es capaz de realizar múltiples llamadas a la API de Loyverse en paralelo dentro de una sola iteración para comparar períodos, calculando diferencias matemáticas netas y variaciones porcentuales (ej. "se vendió un 31,87% más").
 4. **Formato Optimizado para WhatsApp:** Aplica el principio periodístico de "pirámide invertida", entregando el dato clave primero, seguido del desglose en listas, usando negritas para montos y emojis estratégicos (📊, 💰, 📦, 🔝).
@@ -115,3 +169,119 @@ Se implementó con éxito el procesamiento nativo de audios de WhatsApp. En luga
 - **Resultados:** El LLM transcribe con alta precisión y procesa preguntas orales redundantes o complejas de forma impecable.
 
 Con este hito, se da por finalizada y validada en producción toda la Fase 1 del sistema (Lumi NLU Bot).
+
+## [2026-02-28] Sesión: Rediseño Arquitectónico v2 — Naming + Visión Completa de Blue
+
+### Qué se hizo
+
+Sesión de diseño arquitectónico completa en dos fases. Primero se analizaron limitaciones de la v1 y se definió la separación de responsabilidades (Aria = I/O, Cortex = lógica, DB = persistencia, Sync = mirror). Después se definió la visión completa del sistema con sus 3 dominios funcionales y se eligieron los nombres definitivos.
+
+### Naming Definitivo
+
+| Nombre | Rol |
+|--------|-----|
+| **Blue** | El sistema completo (módulo Go, repo, proyecto) |
+| **Aria** | El agente (la cara) — WhatsApp, LLMs, Loyverse, CLI |
+| **Cortex** | El cerebro — motor de lógica de negocio, funciones puras |
+
+### Los 3 Dominios Funcionales de Blue
+
+1. **Administración de Loyverse (POS)**: CLI con Bubble Tea/Charm para el admin — bulk photo upload, estandarizar nombres de productos, detectar campos faltantes, CRUD completo.
+2. **Asistente Operativo (día a día)**: Digitalización de facturas (OCR/AI), ajustes de inventario, tracking de gastos/deudas, consultas de ventas.
+3. **Inteligencia Proactiva (Cortex)**: Demand forecasting, alertas de dead stock, velocidad de venta, reportes automáticos, delegación de tareas, comunicaciones automatizadas.
+
+**Principio de diseño**: Cortex es una colección de funciones puras independientes (analogía: Lambda functions). Cada función es testeable, componible, y se agrega sin tocar el resto del sistema. Blue es infinitamente extensible.
+
+### Decisiones Arquitectónicas
+
+1. **Aria = I/O puro (cara)**: Solo conecta WhatsApp + LLM + Loyverse + CLI. Cero lógica de negocio.
+2. **Cortex = Lógica de negocio (cerebro)**: Funciones puras en Go. Sin I/O, sin side effects. Testeable con `go test` sin mocks.
+3. **Mismo binario, paquetes separados**: `internal/cortex/`, `internal/db/`, `internal/sync/`. NO microservicios.
+4. **DB como source of truth (sync periódico)**: Sync cada ~2 min. Aria nunca consulta Loyverse en real-time. Beneficios: velocidad (~10ms vs ~5s), historial ilimitado, resiliencia.
+5. **Dual DB**: SQLite (no CGO) para Termux/Android. PostgreSQL para VPS. Interfaz en `db/`.
+6. **No CGO (non-negotiable)**: `CGO_ENABLED=0` para Android/Termux.
+7. **Web dashboard como fase final**: Gráficos de rendimiento, estados de deudas, inventario, tareas pendientes.
+
+### Problemas Identificados en Producción
+
+1. **Loyverse API sync delay**: Reembolso tardó ~15 min en aparecer como `REFUND` en la API. Quirk de Loyverse, no bug nuestro. Con DB-first el sync service lo captura en su próximo ciclo.
+2. **LLM tool selection error**: El LLM elegía `get_shift_expenses` para consultas de reembolsos porque `get_sales` no mencionaba refunds en su descripción. Se corrige en el rediseño de tools.
+
+### Archivos modificados/creados
+
+- `CLAUDE.md` — Reescritura completa: naming (Blue/Aria/Cortex), 3 dominios, visión de dashboard, Lambda analogy.
+- `docs/chatbot_checkpoint_v2.md` — Header actualizado con naming, dominios, estructura de paquetes target.
+
+### Estado al cierre
+
+| Módulo                    | Componente | Estado                                        |
+| ------------------------- | ---------- | --------------------------------------------- |
+| Loyverse API client       | Compartido | ✅ Completo — 34 tests (read endpoints)       |
+| Config                    | Compartido | ✅ Completo                                   |
+| LLM client (Groq/Gemini)  | Aria      | ✅ Completo                                   |
+| Agent + macro-tools       | Aria       | ✅ v1 — pendiente refactor a Cortex           |
+| Multi-turn memory         | Aria       | ✅ Completo                                   |
+| Retry/Resilience          | Aria       | ✅ Completo                                   |
+| Voice-to-text (Whisper)   | Aria       | ✅ Completo                                   |
+| WhatsApp bot              | Aria       | ✅ Completo                                   |
+| DB package (interfaz)     | Compartido | 🔴 No iniciado                               |
+| Sync service              | Compartido | 🔴 No iniciado                               |
+| Cortex business logic     | Cortex     | 🔴 No iniciado                               |
+| Cortex: FIFO inventory    | Cortex     | 🔴 No iniciado                               |
+| Cortex: Accounting        | Cortex     | 🔴 No iniciado                               |
+| Cortex: Demand forecast   | Cortex     | 🔴 No iniciado                               |
+| Admin CLI (Bubble Tea)    | Aria       | 🔴 No iniciado                               |
+| Loyverse write endpoints  | Compartido | 🔴 No iniciado                               |
+| Web dashboard             | Blue       | 🔴 No iniciado (fase final)                  |
+
+### Próximos pasos
+
+| Prioridad | Tarea                               | Descripción                                                                                               |
+| --------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| 🔴 Alta   | Diseñar schema DB (mirror Loyverse) | Tablas para receipts, items, categories, shifts, inventory, payment_types. UPSERTs para sync incremental. |
+| 🔴 Alta   | Implementar paquete `db`            | Interfaz + implementación SQLite (no CGO). CRUD puro, sin lógica.                                        |
+| 🔴 Alta   | Implementar paquete `sync`          | Goroutine background, usa `loyverse/` para popular la DB. Incremental vía `updated_since`.                |
+| 🔴 Alta   | Implementar paquete `cortex`        | Extraer lógica de `handlers.go` a funciones puras.                                                        |
+| 🟡 Media  | Refactorizar macro-tools            | Handlers en `agent/` delegan a Cortex → DB.                                                               |
+
+## [2026-02-28] Sesión: Migración SQLite CGO → Pure Go (modernc.org/sqlite)
+
+### Qué se hizo
+
+Se migró la dependencia de SQLite de `github.com/mattn/go-sqlite3` (requiere CGO) a `modernc.org/sqlite` (traducción C-a-Go, zero CGO). Esto desbloquea la compilación con `CGO_ENABLED=0` y habilita cross-compilation a Android/Termux. Cambio de una sola línea de import, ajuste del driver name (`sqlite3` → `sqlite`) y formato de DSN pragmas (`_key=value` → `_pragma=key(value)`).
+
+### Archivos modificados/creados
+
+- `internal/whatsapp/bot.go` — Import `modernc.org/sqlite`, driver `"sqlite"`, DSN con `_pragma=` syntax
+- `go.mod` / `go.sum` — Agregado `modernc.org/sqlite v1.46.1` y dependencias; removido `mattn/go-sqlite3`
+
+### Verificación
+
+- `CGO_ENABLED=0 go build ./cmd/bot/...` — compila exitosamente
+- `task blue` — 34/34 tests loyverse pasan. Fallo pre-existente en `diagnostic_test.go` (no relacionado)
+- Formato de DB SQLite es idéntico entre mattn y modernc — `whatsapp.db` existente funciona sin migración
+
+### Estado al cierre
+
+| Módulo                    | Componente | Estado                                        |
+| ------------------------- | ---------- | --------------------------------------------- |
+| Loyverse API client       | Compartido | ✅ Completo — 34 tests (read endpoints)       |
+| Config                    | Compartido | ✅ Completo                                   |
+| LLM client (Groq/Gemini)  | Aria      | ✅ Completo                                   |
+| Agent + macro-tools       | Aria       | ✅ v1 — pendiente refactor a Cortex           |
+| Multi-turn memory         | Aria       | ✅ Completo                                   |
+| Retry/Resilience          | Aria       | ✅ Completo                                   |
+| Voice-to-text (Whisper)   | Aria       | ✅ Completo                                   |
+| WhatsApp bot (pure Go)    | Aria       | ✅ Completo — CGO eliminado                   |
+| DB package (interfaz)     | Compartido | 🔴 No iniciado                               |
+| Sync service              | Compartido | 🔴 No iniciado                               |
+| Cortex business logic     | Cortex     | 🔴 No iniciado                               |
+
+### Próximos pasos
+
+| Prioridad | Tarea                               | Descripción                                                          |
+| --------- | ----------------------------------- | -------------------------------------------------------------------- |
+| 🔴 Alta   | Deploy a Termux (Android)           | Compilar binario ARM64, instalar Infisical, ejecutar en producción   |
+| 🔴 Alta   | Diseñar schema DB (mirror Loyverse) | Tablas para receipts, items, categories, shifts, inventory           |
+| 🔴 Alta   | Implementar paquete `db`            | Interfaz + implementación SQLite (no CGO). CRUD puro, sin lógica.   |
+| 🟡 Media  | Fix `diagnostic_test.go`            | Error de compilación pre-existente: `undefined: art` en línea 241   |

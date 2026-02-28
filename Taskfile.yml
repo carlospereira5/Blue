@@ -18,16 +18,14 @@ tasks:
       - go test ./... -count=1
 
   dev:
-    desc: "Corre Lumi (WhatsApp si ALLOWED_NUMBERS, CLI si no)"
+    desc: "Corre Lumi via Infisical (WhatsApp si ALLOWED_NUMBERS, CLI si no)"
     cmds:
-      - go run ./cmd/bot/main.go
+      - infisical run -- go run ./cmd/bot/main.go
 
   dev:cli:
-    desc: "Corre Lumi en modo CLI (ignora ALLOWED_NUMBERS)"
-    env:
-      ALLOWED_NUMBERS: ""
+    desc: "Corre Lumi en modo CLI forzado via Infisical (ALLOWED_NUMBERS vacío)"
     cmds:
-      - go run ./cmd/bot/main.go
+      - infisical run -- sh -c 'ALLOWED_NUMBERS="" go run ./cmd/bot/main.go'
 
   build:
     desc: "Compila el binario de Lumi"

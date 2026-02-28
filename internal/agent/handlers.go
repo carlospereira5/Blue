@@ -9,14 +9,14 @@ import (
 
 )
 
-// argentinaLoc es la timezone de Argentina para parsear fechas del usuario.
-var argentinaLoc *time.Location
+// santiagoLoc es la timezone de Chile para parsear fechas del usuario.
+var santiagoLoc *time.Location
 
 func init() {
 	var err error
-	argentinaLoc, err = time.LoadLocation("America/Argentina/Buenos_Aires")
+	santiagoLoc, err = time.LoadLocation("America/Santiago")
 	if err != nil {
-		argentinaLoc = time.FixedZone("ART", -3*60*60)
+		santiagoLoc = time.FixedZone("CLT", -4*60*60)
 	}
 }
 
@@ -249,7 +249,7 @@ func (a *Agent) handleGetShiftExpenses(ctx context.Context, args map[string]any)
 			expenses = append(expenses, map[string]any{
 				"comentario": cm.Comment,
 				"monto":      cm.MoneyAmount,
-				"fecha":      cm.CreatedAt.In(argentinaLoc).Format("02/01/2006 15:04"),
+				"fecha":      cm.CreatedAt.In(santiagoLoc).Format("02/01/2006 15:04"),
 			})
 			shiftTotal += cm.MoneyAmount
 		}
@@ -258,7 +258,7 @@ func (a *Agent) handleGetShiftExpenses(ctx context.Context, args map[string]any)
 		}
 		totalExpenses += shiftTotal
 		result = append(result, map[string]any{
-			"turno_inicio": s.OpenedAt.In(argentinaLoc).Format("02/01/2006 15:04"),
+			"turno_inicio": s.OpenedAt.In(santiagoLoc).Format("02/01/2006 15:04"),
 			"total_gastos": shiftTotal,
 			"gastos":       expenses,
 		})
@@ -378,8 +378,8 @@ func (a *Agent) handleGetStock(ctx context.Context, args map[string]any) (map[st
 	}, nil
 }
 
-// parseDateRange extrae start_date y end_date de los args de Gemini.
-// Retorna timestamps en UTC para el rango completo del día en Argentina.
+// parseDateRange extrae start_date y end_date de los args del LLM.
+// Retorna timestamps en UTC para el rango completo del día en Chile.
 func parseDateRange(args map[string]any) (time.Time, time.Time, error) {
 	startStr := stringArg(args, "start_date")
 	endStr := stringArg(args, "end_date")
@@ -387,12 +387,12 @@ func parseDateRange(args map[string]any) (time.Time, time.Time, error) {
 		return time.Time{}, time.Time{}, fmt.Errorf("start_date y end_date son requeridos")
 	}
 
-	since, err := time.ParseInLocation("2006-01-02", startStr, argentinaLoc)
+	since, err := time.ParseInLocation("2006-01-02", startStr, santiagoLoc)
 	if err != nil {
 		return time.Time{}, time.Time{}, fmt.Errorf("parsing start_date %q: %w", startStr, err)
 	}
 
-	until, err := time.ParseInLocation("2006-01-02", endStr, argentinaLoc)
+	until, err := time.ParseInLocation("2006-01-02", endStr, santiagoLoc)
 	if err != nil {
 		return time.Time{}, time.Time{}, fmt.Errorf("parsing end_date %q: %w", endStr, err)
 	}

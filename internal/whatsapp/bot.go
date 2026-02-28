@@ -7,7 +7,7 @@ import (
 	"log"
 	"os"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -30,8 +30,8 @@ type Bot struct {
 // groupJID es el JID del grupo donde Lumi escucha (vacío = discovery mode, DMs).
 func New(ctx context.Context, ag *agent.Agent, dbPath string, allowedNumbers []string, groupJID string) (*Bot, error) {
 	dbLog := waLog.Stdout("DB", "WARN", true)
-	dsn := "file:" + dbPath + "?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000"
-	container, err := sqlstore.New(ctx, "sqlite3", dsn, dbLog)
+	dsn := "file:" + dbPath + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+	container, err := sqlstore.New(ctx, "sqlite", dsn, dbLog)
 	if err != nil {
 		return nil, fmt.Errorf("whatsapp sqlstore: %w", err)
 	}

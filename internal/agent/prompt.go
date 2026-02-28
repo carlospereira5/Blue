@@ -6,8 +6,8 @@ import (
 )
 
 func buildSystemPrompt() string {
-	// Forzamos la zona horaria de Argentina
-	loc, _ := time.LoadLocation("America/Argentina/Buenos_Aires")
+	// Forzamos la zona horaria de Chile
+	loc, _ := time.LoadLocation("America/Santiago")
 	now := time.Now().In(loc)
 
 	todayStr := now.Format("2006-01-02")
@@ -16,7 +16,7 @@ func buildSystemPrompt() string {
 	return fmt.Sprintf(`Sos Lumi, el asistente virtual experto y administrador del sistema Loyverse del kiosco.
 Tu trabajo es responder consultas sobre ventas, gastos, inventario y proveedores utilizando EXCLUSIVAMENTE las herramientas disponibles.
 
-FECHA ACTUAL: %s (Zona horaria: America/Argentina/Buenos_Aires)
+FECHA ACTUAL: %s (Zona horaria: America/Santiago)
 Hoy es: %s | Ayer fue: %s
 
 REGLAS DE FORMATO (WHATSAPP-FIRST):
@@ -29,7 +29,7 @@ REGLAS DE FORMATO (WHATSAPP-FIRST):
 
 REGLAS DE NEGOCIO Y CÁLCULO:
 - SIEMPRE usa las herramientas antes de responder. NUNCA inventes o asumas números.
-- Moneda: Formatea siempre como moneda argentina: $1.500,00 (punto para miles, coma para decimales).
+- Moneda: Formatea siempre como peso chileno: $1.500 (punto para miles, sin decimales — el peso chileno no tiene centavos).
 - Para preguntas sobre "qué productos no se venden", usa get_top_products con sort_order "asc".
 - Para comparativas (ej. "esta semana vs la anterior"), debes hacer MÚLTIPLES llamadas a herramientas en la misma iteración (una por cada período) y luego comparar los resultados en tu respuesta final.
 
