@@ -365,4 +365,62 @@ sync_meta
 | 🔴 Alta   | Refactorizar macro-tools            | Handlers en `agent/` delegan a Cortex → DB en vez de Loyverse directo.                                      |
 | 🔴 Alta   | Integrar DB en `cmd/bot/main.go`    | Crear store al arrancar, pasar a agent, auto-migrate.                                                        |
 | 🟡 Media  | Tests de integración PostgreSQL     | `_integration_test.go` con build tag `//go:build integration`. Requiere PG local.                            |
-| 🟡 Media  | Fix `diagnostic_test.go`            | Error pre-existente: `undefined: art` en línea 241.                                                          |
+
+## [2026-02-28] Sesión: Implementación paquete `sync` + Fix diagnostic_test.go
+
+### Qué se hizo
+
+Se implementó el paquete `internal/sync/` — servicio de sincronización Loyverse → DB que corre como goroutine en background. El servicio hace sync incremental para receipts y shifts (usando overlap de 24h para capturar refunds tardíos), y full sync para todo el catálogo y datos de referencia (items, categories, stores, employees, payment_types, suppliers, inventory).
+
+Se corrigió el error de compilación pre-existente en `diagnostic_test.go`: variable `art` indefinida (debía ser `chLoc`). Con este fix, **todos los 57 tests del proyecto pasan** por primera vez.
+
+### Archivos modificados/creados
+
+- `internal/sync/sync.go` — **NUEVO**: `Service` struct con `Start()` (loop con ticker) y `RunOnce()`. Interfaces propias `Store` y `Reader` definidas en call site (convención Go). 9 sync methods, uno por entidad.
+- `internal/sync/sync_test.go` — **NUEVO**: 5 tests con `mockReader` + SQLite `:memory:`. Cubre: sync completo, idempotencia, datos vacíos, sync incremental de receipts, y cancelación de contexto.
+- `internal/agent/diagnostic_test.go` — Fix: `art` → `chLoc` en línea 241.
+
+### Decisiones de diseño
+
+1. **Interfaces en call site**: `sync.Store` y `sync.Reader` definen solo los métodos que sync necesita. `db.SQLStore` y `loyverse.Client` los satisfacen automáticamente.
+2. **Sync incremental con overlap**: Receipts y shifts usan `last_sync_at - 24h` como `since` para re-fetch y capturar refunds que Loyverse puede demorar ~15 min en exponer via API. El upsert es idempotente así que re-fetch no duplica datos.
+3. **Full sync para catálogo**: Items, categories, stores, etc. son datasets pequeños para un kiosco (~200 items). Full sync cada ciclo es más simple y robusto que tracking incremental.
+4. **Inventory como full snapshot**: DELETE ALL + INSERT ya implementado en `db.UpsertInventoryLevels()`.
+5. **Dependencia `sync → db`**: El sync package importa `db.SyncMeta` directamente. La dirección de dependencia es natural (sync consume db).
+
+### Verificación
+
+- `go test ./... -count=1` — **57/57 tests PASS** (agent 3s, db 0.13s, loyverse 0.03s, sync 0.6s)
+- `CGO_ENABLED=0 go build ./cmd/bot/...` — compila exitosamente
+- Zero errores de compilación por primera vez en el proyecto
+
+### Estado al cierre
+
+| Módulo                    | Componente | Estado                                        |
+| ------------------------- | ---------- | --------------------------------------------- |
+| Loyverse API client       | Compartido | ✅ Completo — 34 tests (read endpoints)       |
+| Config                    | Compartido | ✅ Completo — con DB/Sync config              |
+| LLM client (Groq/Gemini)  | Aria      | ✅ Completo                                   |
+| Agent + macro-tools       | Aria       | ✅ v1 — pendiente refactor a Cortex           |
+| Multi-turn memory         | Aria       | ✅ Completo                                   |
+| Retry/Resilience          | Aria       | ✅ Completo                                   |
+| Voice-to-text (Whisper)   | Aria       | ✅ Completo                                   |
+| WhatsApp bot (pure Go)    | Aria       | ✅ Completo — CGO eliminado                   |
+| DB package (interfaz+impl)| Compartido | ✅ Completo — 18 tests, dual SQLite/PG        |
+| Sync service              | Compartido | ✅ Completo — 5 tests, incremental + full     |
+| Cortex business logic     | Cortex     | 🔴 No iniciado                               |
+| Cortex: FIFO inventory    | Cortex     | 🔴 No iniciado                               |
+| Cortex: Accounting        | Cortex     | 🔴 No iniciado                               |
+| Cortex: Demand forecast   | Cortex     | 🔴 No iniciado                               |
+| Admin CLI (Bubble Tea)    | Aria       | 🔴 No iniciado                               |
+| Loyverse write endpoints  | Compartido | 🔴 No iniciado                               |
+| Web dashboard             | Blue       | 🔴 No iniciado (fase final)                  |
+
+### Próximos pasos
+
+| Prioridad | Tarea                                 | Descripción                                                                                                  |
+| --------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| 🔴 Alta   | Integrar DB + Sync en `cmd/bot/main.go` | Crear store al arrancar, auto-migrate, iniciar sync goroutine, pasar store a agent.                        |
+| 🔴 Alta   | Implementar paquete `cortex`          | Extraer lógica de `handlers.go` a funciones puras que lean de `db.Store`.                                    |
+| 🔴 Alta   | Refactorizar macro-tools              | Handlers en `agent/` delegan a Cortex → DB en vez de Loyverse directo.                                      |
+| 🟡 Media  | Tests de integración PostgreSQL       | `_integration_test.go` con build tag `//go:build integration`. Requiere PG local.                            |
