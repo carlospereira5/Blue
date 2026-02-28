@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/joho/godotenv"
@@ -25,6 +26,9 @@ type Config struct {
 	WhatsAppDBPath   string
 	AllowedNumbers   []string
 	WhatsAppGroupJID string
+	DBDriver         string // "sqlite" (default) or "postgres"
+	DBDSN            string // "blue.db" for SQLite, "postgres://..." for PostgreSQL
+	SyncInterval     int    // seconds, default 120
 }
 
 // Load carga la configuración desde variables de entorno.
@@ -44,6 +48,9 @@ func Load() (*Config, error) {
 		WhatsAppDBPath:   getEnv("WHATSAPP_DB_PATH", "whatsapp.db"),
 		AllowedNumbers:   parseCSV(getEnv("ALLOWED_NUMBERS", "")),
 		WhatsAppGroupJID: getEnv("WHATSAPP_GROUP_JID", ""),
+		DBDriver:         getEnv("DB_DRIVER", "sqlite"),
+		DBDSN:            getEnv("DB_DSN", "blue.db"),
+		SyncInterval:     getEnvInt("SYNC_INTERVAL", 120),
 	}
 
 	if cfg.LoyverseAPIKey == "" {
@@ -95,6 +102,18 @@ func getEnv(key, defaultValue string) string {
 		return v
 	}
 	return defaultValue
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	s := os.Getenv(key)
+	if s == "" {
+		return defaultValue
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return defaultValue
+	}
+	return v
 }
 
 func parseCSV(s string) []string {

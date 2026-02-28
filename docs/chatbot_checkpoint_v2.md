@@ -285,3 +285,84 @@ Se migró la dependencia de SQLite de `github.com/mattn/go-sqlite3` (requiere CG
 | 🔴 Alta   | Diseñar schema DB (mirror Loyverse) | Tablas para receipts, items, categories, shifts, inventory           |
 | 🔴 Alta   | Implementar paquete `db`            | Interfaz + implementación SQLite (no CGO). CRUD puro, sin lógica.   |
 | 🟡 Media  | Fix `diagnostic_test.go`            | Error de compilación pre-existente: `undefined: art` en línea 241   |
+
+## [2026-02-28] Sesión: Implementación completa del paquete `db` — Schema, Interface & Dual-Driver
+
+### Qué se hizo
+
+Implementación completa del paquete `internal/db/` con soporte dual SQLite/PostgreSQL desde el día 1. Se crearon 12 archivos nuevos que cubren: interfaz `Store` con 18 métodos (9 upserts, 6 reads, 2 sync meta, 1 migrate), abstracción `Dialect` para diferencias SQL entre drivers (placeholders `?` vs `$N`, tipos DDL, pragmas DSN), DDL completo para 20 tablas con todos los índices, y upserts atómicos con manejo de children (line_items, payments, taxes, discounts, modifiers, cash_movements). Se agregó el campo `ID` al struct `Receipt` de Loyverse (el API lo devuelve pero no se capturaba). Se actualizó `config.go` con `DBDriver`, `DBDSN` y `SyncInterval`. 18 tests pasan con SQLite `:memory:`, `CGO_ENABLED=0` compila limpio.
+
+### Archivos modificados/creados
+
+- `internal/loyverse/types.go` — Agregado `ID string \`json:"id"\`` como primer campo de `Receipt`
+- `internal/config/config.go` — Agregados campos `DBDriver`, `DBDSN`, `SyncInterval` + helper `getEnvInt()`
+- `internal/db/store.go` — **NUEVO**: Interface `Store` (18 métodos) + tipo `SyncMeta`
+- `internal/db/dialect.go` — **NUEVO**: Interface `Dialect` + `sqliteDialect` + `postgresDialect`
+- `internal/db/sqlstore.go` — **NUEVO**: `SQLStore` struct, `New()`, `Close()`, `Migrate()`
+- `internal/db/migrate.go` — **NUEVO**: DDL completo SQLite + PostgreSQL (20 tablas, todos los índices)
+- `internal/db/helpers.go` — **NUEVO**: Time formatting/parsing, nullable helpers, bool/string conversion
+- `internal/db/sync_meta.go` — **NUEVO**: `GetSyncMeta()`, `SetSyncMeta()` con upsert
+- `internal/db/reference.go` — **NUEVO**: Upsert stores, employees, payment_types, suppliers + `GetPaymentTypes()`
+- `internal/db/catalog.go` — **NUEVO**: Upsert items+variants, categories, inventory_levels + reads completos
+- `internal/db/receipt.go` — **NUEVO**: `UpsertReceipts()` (batched 100/tx, atómico con todos los hijos) + `GetReceiptsByDateRange()`
+- `internal/db/shift.go` — **NUEVO**: `UpsertShifts()` + `GetShiftsByDateRange()` (con cash_movements, taxes, payments)
+- `internal/db/store_test.go` — **NUEVO**: 18 tests table-driven con SQLite `:memory:`
+
+### Decisiones de diseño
+
+1. **Un solo `SQLStore`, doble dialect**: No se duplica código. La misma implementación funciona para SQLite y PostgreSQL cambiando solo placeholders y tipos DDL via la interfaz `Dialect`.
+2. **Upsert atómico con children**: Dentro de una transacción: upsert header → delete children → re-insert children. Esto garantiza consistencia ante refunds o ediciones de receipts en Loyverse.
+3. **Inventory como full-snapshot**: `UpsertInventoryLevels()` hace DELETE ALL + INSERT dentro de un tx, ya que Loyverse no provee `updated_at` para inventory.
+4. **Batch size 100**: Receipts se procesan en batches de 100 por transacción para balancear performance y memory.
+5. **Empty slices, not nil**: Todos los reads devuelven `[]T{}` vacío, nunca `nil`, para evitar null checks en Cortex.
+
+### Schema (20 tablas)
+
+```
+receipts, line_items, line_item_taxes, line_item_discounts, line_item_modifiers,
+receipt_payments, receipt_discounts, receipt_taxes,
+shifts, cash_movements, shift_taxes, shift_payments,
+items, variants, categories, inventory_levels,
+stores, employees, payment_types, suppliers,
+sync_meta
+```
+
+### Verificación
+
+- `go test ./internal/db/... -v` — 18/18 tests PASS (0.15s)
+- `go test ./internal/loyverse/...` — 34/34 tests PASS (pre-existentes, no afectados)
+- `CGO_ENABLED=0 go build ./cmd/bot/...` — compila exitosamente
+- Fallo pre-existente en `agent/diagnostic_test.go` (`undefined: art`) — no relacionado
+
+### Estado al cierre
+
+| Módulo                    | Componente | Estado                                        |
+| ------------------------- | ---------- | --------------------------------------------- |
+| Loyverse API client       | Compartido | ✅ Completo — 34 tests (read endpoints)       |
+| Config                    | Compartido | ✅ Completo — con DB/Sync config              |
+| LLM client (Groq/Gemini)  | Aria      | ✅ Completo                                   |
+| Agent + macro-tools       | Aria       | ✅ v1 — pendiente refactor a Cortex           |
+| Multi-turn memory         | Aria       | ✅ Completo                                   |
+| Retry/Resilience          | Aria       | ✅ Completo                                   |
+| Voice-to-text (Whisper)   | Aria       | ✅ Completo                                   |
+| WhatsApp bot (pure Go)    | Aria       | ✅ Completo — CGO eliminado                   |
+| DB package (interfaz+impl)| Compartido | ✅ Completo — 18 tests, dual SQLite/PG        |
+| Sync service              | Compartido | 🔴 No iniciado                               |
+| Cortex business logic     | Cortex     | 🔴 No iniciado                               |
+| Cortex: FIFO inventory    | Cortex     | 🔴 No iniciado                               |
+| Cortex: Accounting        | Cortex     | 🔴 No iniciado                               |
+| Cortex: Demand forecast   | Cortex     | 🔴 No iniciado                               |
+| Admin CLI (Bubble Tea)    | Aria       | 🔴 No iniciado                               |
+| Loyverse write endpoints  | Compartido | 🔴 No iniciado                               |
+| Web dashboard             | Blue       | 🔴 No iniciado (fase final)                  |
+
+### Próximos pasos
+
+| Prioridad | Tarea                               | Descripción                                                                                                  |
+| --------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| 🔴 Alta   | Implementar paquete `sync`          | Goroutine background cada ~2 min, usa `loyverse/` client + `db/` store. Incremental via `updated_since`.     |
+| 🔴 Alta   | Implementar paquete `cortex`        | Extraer lógica de `handlers.go` a funciones puras que lean de `db.Store`.                                    |
+| 🔴 Alta   | Refactorizar macro-tools            | Handlers en `agent/` delegan a Cortex → DB en vez de Loyverse directo.                                      |
+| 🔴 Alta   | Integrar DB en `cmd/bot/main.go`    | Crear store al arrancar, pasar a agent, auto-migrate.                                                        |
+| 🟡 Media  | Tests de integración PostgreSQL     | `_integration_test.go` con build tag `//go:build integration`. Requiere PG local.                            |
+| 🟡 Media  | Fix `diagnostic_test.go`            | Error pre-existente: `undefined: art` en línea 241.                                                          |

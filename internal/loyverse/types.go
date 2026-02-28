@@ -6,6 +6,7 @@ import "time"
 // Receipt representa una transacción/venta completada en el POS.
 // Campos alineados con el schema del Postman collection.
 type Receipt struct {
+	ID             string          `json:"id"`
 	ReceiptNumber  string          `json:"receipt_number"`
 	Note           string          `json:"note,omitempty"`
 	ReceiptType    string          `json:"receipt_type,omitempty"`
