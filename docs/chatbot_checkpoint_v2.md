@@ -570,6 +570,90 @@ func CalculateSalesMetrics(receipts []loyverse.Receipt) SalesMetrics {
 | 🔴 Alta   | Refactorizar más handlers| handleGetTopProducts, handleGetStock, handleGetShiftExpenses → Cortex → DB |
 | 🟡 Media  | Tests de integración PG  | `_integration_test.go` con build tag `//go:build integration`             |
 
+## [2026-03-01] Sesión: Debugging Sync + Fix Receipt ID + Verificación DB Hits
+
+### Qué se hizo
+
+1. **Fix Receipt ID**: La API de Loyverse (free tier) NO devuelve campo `id` en receipts. Se modificó el código para usar `receipt_number` como identificador único.
+
+2. **Debug logs agregados**: Se agregaron logs exhaustivos en sync, db y agent para verificar el flujo de datos:
+   - `[DEBUG db] 🔍 DB HIT: GetReceiptsByDateRange(...)` — entrada a la query
+   - `[DEBUG db] ✅ DB HIT: GetReceiptsByDateRange returned N receipts` — resultado
+
+3. **Verificación de DB hits**: Se probó el sistema con preguntas repetidas para confirmar que los datos se leen de PostgreSQL y no de Loyverse API.
+
+### Decisión de diseño: receipt_number como ID
+
+- **Problema**: La API de Loyverse no devuelve campo `id` en receipts (campo de uso interno)
+- **Solución**: Usar `receipt_number` como identificador único
+- **Ventaja**: Simplicidad máxima — solo 1 cambio de código
+- **Limitación**: Solo funciona para negocios con 1 store (el receipt_number es único por store)
+- **Si se usan múltiples stores**: Usar `receipt_number + store_id` como clave única
+
+### Evidencia de funcionamiento
+
+```
+# Sync trae datos de Loyverse y guarda en PostgreSQL
+[sync] receipts: 287 (since 2026-02-28)
+[sync] DEBUG first receipt from API: id="1-58925", receipt_number="1-58925"
+[DEBUG db] UpsertReceipts: completed 287 receipts
+
+# Query a la DB (NO a Loyverse API)
+[DEBUG agent] getReceipts: using DB (since=2026-02-23 until=2026-03-02)
+[DEBUG db] 🔍 DB HIT: GetReceiptsByDateRange(since=2026-02-23, until=2026-03-02)
+[DEBUG db] ✅ DB HIT: GetReceiptsByDateRange returned 288 receipts
+[DEBUG agent] getReceipts: DB returned 288 receipts
+
+# Segunda pregunta (mismo query, misma DB)
+[DEBUG agent] getReceipts: using DB
+[DEBUG db] 🔍 DB HIT: GetReceiptsByDateRange(since=2026-02-23, until=2026-03-02)
+[DEBUG db] ✅ DB HIT: GetReceiptsByDateRange returned 288 receipts
+```
+
+### Archivos modificados
+
+- `internal/loyverse/types.go` — `ID` ahora mapea desde `ReceiptNumber` (json:"-"`)
+- `internal/sync/sync.go` — mapeo `receipts[i].ID = receipts[i].ReceiptNumber`
+- `internal/db/receipt.go` — logs de debug en GetReceiptsByDateRange y UpsertReceipts
+- `internal/agent/handlers.go` — logs de DB vs API
+- `internal/loyverse/client.go` — logs de debug para respuesta de receipts
+
+### Verificación PostgreSQL
+
+```sql
+SELECT id, receipt_type, total_money, created_at FROM receipts LIMIT 5;
+   id    | receipt_type | total_money |       created_at       
+---------+--------------+-------------+------------------------
+ 1-58923 | SALE         |        4900 | 2026-03-01 00:11:08+00
+ 1-58922 | SALE         |         500 | 2026-03-01 00:09:05+00
+```
+
+### Estado al cierre
+
+| Módulo                    | Componente | Estado                                        |
+| ------------------------- | ---------- | --------------------------------------------- |
+| Loyverse API client       | Compartido | ✅ Completo — 34 tests                         |
+| Config                   | Compartido | ✅ Completo                                   |
+| LLM client (Groq/Gemini)  | Aria       | ✅ Completo                                   |
+| Agent + macro-tools       | Aria       | ✅ v2 — DB-first completo                    |
+| Multi-turn memory         | Aria       | ✅ Completo                                   |
+| Retry/Resilience          | Aria       | ✅ Completo                                   |
+| Voice-to-text (Whisper)   | Aria       | ✅ Completo                                   |
+| WhatsApp bot (pure Go)    | Aria       | ✅ Completo                                   |
+| DB package (interfaz+impl)| Compartido | ✅ Completo — 18 tests SQLite + 18 PG tests   |
+| Sync service              | Compartido | ✅ Completo                                   |
+| Integracion main.go       | Blue       | ✅ Completo                                   |
+| Cortex (sales)            | Cortex     | ✅ Iniciado                                   |
+| **DB-first verification** | **Blue**   | ✅ **Verificado** — DB hits confirmados        |
+
+### Próximos pasos
+
+| Prioridad | Tarea                     | Descripción                                                                |
+| --------- | ------------------------- | ------------------------------------------------------------------------- |
+| 🔴 Alta   | Más funciones Cortex     | CalculateTopProducts, CalculateInventoryValuation, etc.                   |
+| 🔴 Alta   | Refactorizar handlers    | Delegar más lógica a Cortex                                                |
+| 🟡 Media  | Limpiar logs de debug   | Los logs actuales son muy verbosos, dejar solo los esenciales             |
+
 ## [2026-02-28] Sesión: PostgreSQL Integration Tests + Migración completa de handlers a DB
 
 ### Qué se hizo

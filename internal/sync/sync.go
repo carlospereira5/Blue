@@ -12,11 +12,11 @@ import (
 	"blue/internal/loyverse"
 )
 
-// overlap is re-fetched each cycle to catch late-arriving refunds/updates.
-const overlap = 24 * time.Hour
-
 // maxInitialWindow is the maximum history to fetch on first sync (30 days to avoid 402 paywall).
 const maxInitialWindow = 30 * 24 * time.Hour
+
+// overlap is re-fetched each cycle to catch late-arriving refunds/updates.
+const overlap = 24 * time.Hour
 
 // Store defines the subset of db.Store that the sync service needs.
 type Store interface {
@@ -219,7 +219,19 @@ func (s *Service) syncReceipts(ctx context.Context) error {
 	}
 	s.logger.Printf("[sync] receipts: %d (since %s)", len(receipts), since.Format("2006-01-02"))
 
+	// Map receipt_number to ID (Loyverse free tier no devuelve campo "id" en receipts)
+	for i := range receipts {
+		receipts[i].ID = receipts[i].ReceiptNumber
+	}
+
+	// DEBUG: log first receipt to verify data from API
+	if len(receipts) > 0 {
+		s.logger.Printf("[sync] DEBUG first receipt from API: id=%q, receipt_number=%q, type=%q, total=%.2f",
+			receipts[0].ID, receipts[0].ReceiptNumber, receipts[0].ReceiptType, receipts[0].TotalMoney)
+	}
+
 	if err := s.store.UpsertReceipts(ctx, receipts); err != nil {
+		s.logger.Printf("[sync] ERROR UpsertReceipts: %v", err)
 		return err
 	}
 
@@ -247,7 +259,14 @@ func (s *Service) syncShifts(ctx context.Context) error {
 	}
 	s.logger.Printf("[sync] shifts: %d (since %s)", len(shifts), since.Format("2006-01-02"))
 
+	// DEBUG: log first shift
+	if len(shifts) > 0 {
+		s.logger.Printf("[sync] DEBUG first shift: id=%q, opened_at=%v",
+			shifts[0].ID, shifts[0].OpenedAt)
+	}
+
 	if err := s.store.UpsertShifts(ctx, shifts); err != nil {
+		s.logger.Printf("[sync] ERROR UpsertShifts: %v", err)
 		return err
 	}
 

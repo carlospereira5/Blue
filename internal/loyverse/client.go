@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"time"
@@ -103,6 +104,16 @@ func (c *Client) do(req *http.Request, dest any) error {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("reading response body: %w", err)
+	}
+
+	// DEBUG: log response body for receipts endpoint
+	if req.URL.Path == "/receipts" && len(body) > 0 {
+		// Log first 500 chars to avoid flooding
+		maxLen := 500
+		if len(body) < maxLen {
+			maxLen = len(body)
+		}
+		log.Printf("[DEBUG loyverse] /receipts response (first %d bytes): %s", maxLen, string(body[:maxLen]))
 	}
 
 	if resp.StatusCode >= 400 {

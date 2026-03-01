@@ -413,24 +413,36 @@ func intArg(args map[string]any, key string, defaultVal int) int {
 // getReceipts retorna receipts del rango, usando DB local si está disponible.
 func (a *Agent) getReceipts(ctx context.Context, since, until time.Time) ([]loyverse.Receipt, error) {
 	if a.store != nil {
-		return a.store.GetReceiptsByDateRange(ctx, since, until)
+		a.debugLog("getReceipts: using DB (since=%s until=%s)", since.Format("2006-01-02"), until.Format("2006-01-02"))
+		receipts, err := a.store.GetReceiptsByDateRange(ctx, since, until)
+		a.debugLog("getReceipts: DB returned %d receipts", len(receipts))
+		return receipts, err
 	}
+	a.debugLog("getReceipts: using LOYVERSE API (since=%s until=%s)", since.Format("2006-01-02"), until.Format("2006-01-02"))
 	return a.loyverse.GetAllReceipts(ctx, since, until)
 }
 
 // getShifts retorna shifts del rango, usando DB local si está disponible.
 func (a *Agent) getShifts(ctx context.Context, since, until time.Time) ([]loyverse.Shift, error) {
 	if a.store != nil {
-		return a.store.GetShiftsByDateRange(ctx, since, until)
+		a.debugLog("getShifts: using DB (since=%s until=%s)", since.Format("2006-01-02"), until.Format("2006-01-02"))
+		shifts, err := a.store.GetShiftsByDateRange(ctx, since, until)
+		a.debugLog("getShifts: DB returned %d shifts", len(shifts))
+		return shifts, err
 	}
+	a.debugLog("getShifts: using LOYVERSE API (since=%s until=%s)", since.Format("2006-01-02"), until.Format("2006-01-02"))
 	return a.loyverse.GetAllShifts(ctx, since, until)
 }
 
 // getItems retorna todos los items, usando DB local si está disponible.
 func (a *Agent) getItems(ctx context.Context) ([]loyverse.Item, error) {
 	if a.store != nil {
-		return a.store.GetAllItems(ctx)
+		a.debugLog("getItems: using DB")
+		items, err := a.store.GetAllItems(ctx)
+		a.debugLog("getItems: DB returned %d items", len(items))
+		return items, err
 	}
+	a.debugLog("getItems: using LOYVERSE API")
 	return a.loyverse.GetAllItems(ctx)
 }
 
@@ -438,8 +450,12 @@ func (a *Agent) getItems(ctx context.Context) ([]loyverse.Item, error) {
 // Normaliza a []loyverse.Category independientemente de la fuente.
 func (a *Agent) getCategories(ctx context.Context) ([]loyverse.Category, error) {
 	if a.store != nil {
-		return a.store.GetAllCategories(ctx)
+		a.debugLog("getCategories: using DB")
+		cats, err := a.store.GetAllCategories(ctx)
+		a.debugLog("getCategories: DB returned %d categories", len(cats))
+		return cats, err
 	}
+	a.debugLog("getCategories: using LOYVERSE API")
 	resp, err := a.loyverse.GetCategories(ctx)
 	if err != nil {
 		return nil, err
@@ -450,7 +466,11 @@ func (a *Agent) getCategories(ctx context.Context) ([]loyverse.Category, error) 
 // getInventory retorna todos los niveles de inventario, usando DB local si está disponible.
 func (a *Agent) getInventory(ctx context.Context) ([]loyverse.InventoryLevel, error) {
 	if a.store != nil {
-		return a.store.GetAllInventoryLevels(ctx)
+		a.debugLog("getInventory: using DB")
+		inv, err := a.store.GetAllInventoryLevels(ctx)
+		a.debugLog("getInventory: DB returned %d levels", len(inv))
+		return inv, err
 	}
+	a.debugLog("getInventory: using LOYVERSE API")
 	return a.loyverse.GetAllInventory(ctx)
 }

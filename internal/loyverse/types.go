@@ -5,35 +5,37 @@ import "time"
 
 // Receipt representa una transacción/venta completada en el POS.
 // Campos alineados con el schema del Postman collection.
+// NOTA: Loyverse NO devuelve campo "id" en receipts para cuentas gratuitas.
+// El identificador único es receipt_number (público). Usamos receipt_number como ID.
 type Receipt struct {
-	ID             string          `json:"id"`
-	ReceiptNumber  string          `json:"receipt_number"`
-	Note           string          `json:"note,omitempty"`
-	ReceiptType    string          `json:"receipt_type,omitempty"`
-	RefundFor      string          `json:"refund_for,omitempty"`
-	Order          string          `json:"order,omitempty"`
-	CreatedAt      time.Time       `json:"created_at"`
-	ReceiptDate    time.Time       `json:"receipt_date,omitempty"`
-	UpdatedAt      time.Time       `json:"updated_at"`
-	CancelledAt    *time.Time      `json:"cancelled_at,omitempty"`
-	Source         string          `json:"source,omitempty"`
-	TotalMoney     float64         `json:"total_money"`
-	TotalTax       float64         `json:"total_tax"`
-	PointsEarned   float64         `json:"points_earned,omitempty"`
-	PointsDeducted float64         `json:"points_deducted,omitempty"`
-	PointsBalance  float64         `json:"points_balance,omitempty"`
-	CustomerID     string          `json:"customer_id,omitempty"`
-	TotalDiscount  float64         `json:"total_discount"`
-	EmployeeID     string          `json:"employee_id,omitempty"`
-	StoreID        string          `json:"store_id,omitempty"`
-	PosDeviceID    string          `json:"pos_device_id,omitempty"`
-	DiningOption   string          `json:"dining_option,omitempty"`
+	ID             string            `json:"-"` // No viene en la API, se mapea desde receipt_number
+	ReceiptNumber  string            `json:"receipt_number"`
+	Note           string            `json:"note,omitempty"`
+	ReceiptType    string            `json:"receipt_type,omitempty"`
+	RefundFor      string            `json:"refund_for,omitempty"`
+	Order          string            `json:"order,omitempty"`
+	CreatedAt      time.Time         `json:"created_at"`
+	ReceiptDate    time.Time         `json:"receipt_date,omitempty"`
+	UpdatedAt      time.Time         `json:"updated_at"`
+	CancelledAt    *time.Time        `json:"cancelled_at,omitempty"`
+	Source         string            `json:"source,omitempty"`
+	TotalMoney     float64           `json:"total_money"`
+	TotalTax       float64           `json:"total_tax"`
+	PointsEarned   float64           `json:"points_earned,omitempty"`
+	PointsDeducted float64           `json:"points_deducted,omitempty"`
+	PointsBalance  float64           `json:"points_balance,omitempty"`
+	CustomerID     string            `json:"customer_id,omitempty"`
+	TotalDiscount  float64           `json:"total_discount"`
+	EmployeeID     string            `json:"employee_id,omitempty"`
+	StoreID        string            `json:"store_id,omitempty"`
+	PosDeviceID    string            `json:"pos_device_id,omitempty"`
+	DiningOption   string            `json:"dining_option,omitempty"`
 	TotalDiscounts []ReceiptDiscount `json:"total_discounts,omitempty"`
-	TotalTaxes     []ReceiptTax    `json:"total_taxes,omitempty"`
-	Tip            float64         `json:"tip,omitempty"`
-	Surcharge      float64         `json:"surcharge,omitempty"`
-	LineItems      []LineItem      `json:"line_items"`
-	Payments       []Payment       `json:"payments"`
+	TotalTaxes     []ReceiptTax      `json:"total_taxes,omitempty"`
+	Tip            float64           `json:"tip,omitempty"`
+	Surcharge      float64           `json:"surcharge,omitempty"`
+	LineItems      []LineItem        `json:"line_items"`
+	Payments       []Payment         `json:"payments"`
 }
 
 // ReceiptDiscount representa un descuento a nivel de receipt.
