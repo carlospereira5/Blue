@@ -12,7 +12,9 @@ import (
 
 	"blue/internal/agent"
 	"blue/internal/config"
+	"blue/internal/db"
 	"blue/internal/loyverse"
+	"blue/internal/sync"
 	"blue/internal/whatsapp"
 
 	"github.com/sashabaranov/go-openai"
@@ -30,6 +32,26 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+
+	// Inicializar base de datos
+	store, err := db.New(cfg.DBDriver, cfg.DBDSN)
+	if err != nil {
+		log.Fatalf("db: %v", err)
+	}
+	defer store.Close()
+
+	// Migrar schema
+	if err := store.Migrate(context.Background()); err != nil {
+		log.Fatalf("db migrate: %v", err)
+	}
+	log.Printf("[db] conectado a %s (%s)", cfg.DBDriver, cfg.DBDSN)
+
+	// Crear cliente Loyverse
+	loyClient := loyverse.NewClient(http.DefaultClient, cfg.LoyverseAPIKey)
+
+	// Iniciar sync service en background
+	syncService := sync.New(store, loyClient, cfg.SyncInterval, nil)
+	go syncService.Start(ctx)
 
 	var llm agent.LLM
 
@@ -49,21 +71,19 @@ func main() {
 		llm = agent.NewGeminiLLM(geminiClient, "gemini-2.5-flash")
 	}
 
-	loyClient := loyverse.NewClient(http.DefaultClient, cfg.LoyverseAPIKey)
-
 	suppliers, err := agent.LoadSuppliers(cfg.SuppliersFile)
 	if err != nil {
 		log.Printf("aviso: no se pudo cargar suppliers (%v) — UC5 no va a funcionar", err)
 		suppliers = make(map[string][]string)
 	}
 
-	lumi := agent.New(llm, loyClient, suppliers, agent.WithDebug(cfg.Debug))
+	lumi := agent.New(llm, loyClient, suppliers, agent.WithDebug(cfg.Debug), agent.WithStore(store))
 
 	if cfg.Debug {
 		log.Println("[DEBUG] modo debug activado — logs en stderr")
 		log.Printf("[DEBUG] LOYVERSE_TOKEN: %s...%s (%d chars)",
 			cfg.LoyverseAPIKey[:4], cfg.LoyverseAPIKey[len(cfg.LoyverseAPIKey)-4:], len(cfg.LoyverseAPIKey))
-		
+
 		if cfg.Provider == "openai" {
 			log.Printf("[DEBUG] OPENAI_API_KEY: %s...%s (%d chars)",
 				cfg.OpenAIAPIKey[:4], cfg.OpenAIAPIKey[len(cfg.OpenAIAPIKey)-4:], len(cfg.OpenAIAPIKey))

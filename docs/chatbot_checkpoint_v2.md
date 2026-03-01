@@ -420,7 +420,59 @@ Se corrigió el error de compilación pre-existente en `diagnostic_test.go`: var
 
 | Prioridad | Tarea                                 | Descripción                                                                                                  |
 | --------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| 🔴 Alta   | Integrar DB + Sync en `cmd/bot/main.go` | Crear store al arrancar, auto-migrate, iniciar sync goroutine, pasar store a agent.                        |
+| 🔴 Alta   | Integrar DB + Sync en `cmd/bot/main.go` | Crear store al arranque, auto-migrate, iniciar sync goroutine, pasar store a agent.                        |
 | 🔴 Alta   | Implementar paquete `cortex`          | Extraer lógica de `handlers.go` a funciones puras que lean de `db.Store`.                                    |
 | 🔴 Alta   | Refactorizar macro-tools              | Handlers en `agent/` delegan a Cortex → DB en vez de Loyverse directo.                                      |
 | 🟡 Media  | Tests de integración PostgreSQL       | `_integration_test.go` con build tag `//go:build integration`. Requiere PG local.                            |
+
+## [2026-02-28] Sesión: Integración DB + Sync en main.go + PostgreSQL driver
+
+### Qué se hizo
+
+Se integró DB y Sync en `cmd/bot/main.go` completando el círculo del sistema Blue:
+1. Se agregó campo `store db.Store` al Agent + option `WithStore()` para inyección de dependencias
+2. Se agregó import de `github.com/jackc/pgx/v5/stdlib` para PostgreSQL driver
+3. En main.go: crear store, migrate, iniciar sync goroutine, pasar store al Agent
+4. Se verificó conexión exitosa a PostgreSQL (contenedor Docker corriendo en localhost:5432)
+
+### Archivos modificados/creados
+
+- `internal/agent/agent.go` — Agregado campo `store db.Store` + opción `WithStore()`
+- `internal/db/sqlstore.go` — Agregado import `github.com/jackc/pgx/v5/stdlib`
+- `cmd/bot/main.go` — Integración completa: db.New() → migrate → sync.Start() → agent.WithStore()
+
+### Verificación
+
+- `go test ./... -count=1` — **57/57 tests PASS**
+- `CGO_ENABLED=0 go build ./cmd/bot/...` — compila exitosamente
+- PostgreSQL connection test: `[db] conectado a postgres (postgres://...)` ✅
+
+### Estado al cierre
+
+| Módulo                    | Componente | Estado                                        |
+| ------------------------- | ---------- | --------------------------------------------- |
+| Loyverse API client       | Compartido | ✅ Completo — 34 tests (read endpoints)       |
+| Config                    | Compartido | ✅ Completo — con DB/Sync config              |
+| LLM client (Groq/Gemini)  | Aria      | ✅ Completo                                   |
+| Agent + macro-tools       | Aria       | ✅ v1 — con soporte DB                        |
+| Multi-turn memory         | Aria       | ✅ Completo                                   |
+| Retry/Resilience          | Aria       | ✅ Completo                                   |
+| Voice-to-text (Whisper)   | Aria       | ✅ Completo                                   |
+| WhatsApp bot (pure Go)    | Aria       | ✅ Completo — CGO eliminado                   |
+| DB package (interfaz+impl)| Compartido | ✅ Completo — 18 tests, dual SQLite/PG        |
+| Sync service              | Compartido | ✅ Completo — 5 tests, incremental + full     |
+| **Integración main.go**   | **Blue**   | ✅ **Completo** — DB + Sync + Agent           |
+| Cortex business logic     | Cortex     | 🔴 No iniciado                               |
+| Cortex: FIFO inventory    | Cortex     | 🔴 No iniciado                               |
+| Cortex: Accounting        | Cortex     | 🔴 No iniciado                               |
+| Cortex: Demand forecast   | Cortex     | 🔴 No iniciado                               |
+| Admin CLI (Bubble Tea)    | Aria       | 🔴 No iniciado                               |
+| Loyverse write endpoints  | Compartido | 🔴 No iniciado                               |
+| Web dashboard             | Blue       | 🔴 No iniciado (fase final)                  |
+
+### Próximos pasos
+
+| Prioridad | Tarea                       | Descripción                                                                 |
+| --------- | --------------------------- | --------------------------------------------------------------------------- |
+| 🔴 Alta   | Implementar paquete `cortex` | Extraer lógica de `handlers.go` a funciones puras que lean de `db.Store`. |
+| 🔴 Alta   | Refactorizar macro-tools    | Handlers en `agent/` delegan a Cortex → DB en vez de Loyverse directo.    |

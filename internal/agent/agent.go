@@ -7,6 +7,7 @@ import (
 	"log"
 	"time"
 
+	"blue/internal/db"
 	"blue/internal/loyverse"
 )
 
@@ -15,6 +16,7 @@ import (
 type Agent struct {
 	llm            LLM
 	loyverse       loyverse.Reader
+	store          db.Store // opcional: si está presente, se usa DB en lugar de Loyverse directo
 	suppliers      map[string][]string
 	debug          bool
 	sessionManager *SessionManager
@@ -26,6 +28,12 @@ type Option func(*Agent)
 // WithDebug activa el modo debug que logea todo el flujo interno.
 func WithDebug(enabled bool) Option {
 	return func(a *Agent) { a.debug = enabled }
+}
+
+// WithStore inyecta la base de datos. Si está presente, los handlers
+// usarán la DB en lugar de consultar Loyverse directamente.
+func WithStore(store db.Store) Option {
+	return func(a *Agent) { a.store = store }
 }
 
 // New crea un nuevo Agent listo para chatear.
