@@ -42,7 +42,6 @@ func (a *Agent) ExecuteTool(ctx context.Context, name string, args map[string]an
 
 // handleGetSales agrega ventas por método de pago en el rango dado.
 // Separa ventas (SALE) de reembolsos (REFUND) para reportar correctamente.
-// Ahora usa la DB local via Cortex en lugar de la API de Loyverse.
 func (a *Agent) handleGetSales(ctx context.Context, args map[string]any) (map[string]any, error) {
 	since, until, err := parseDateRange(args)
 	if err != nil {
@@ -50,22 +49,11 @@ func (a *Agent) handleGetSales(ctx context.Context, args map[string]any) (map[st
 	}
 	a.debugLog("handleGetSales: rango UTC since=%s until=%s", since.Format(time.RFC3339), until.Format(time.RFC3339))
 
-	// Usar DB local en lugar de Loyverse API
-	var receipts []loyverse.Receipt
-	if a.store != nil {
-		receipts, err = a.store.GetReceiptsByDateRange(ctx, since, until)
-		if err != nil {
-			return nil, fmt.Errorf("get receipts from DB: %w", err)
-		}
-		a.debugLog("handleGetSales: %d receipts obtenidos de DB local", len(receipts))
-	} else {
-		// Fallback a Loyverse API si no hay store (modo legacy)
-		receipts, err = a.loyverse.GetAllReceipts(ctx, since, until)
-		if err != nil {
-			return nil, fmt.Errorf("get receipts: %w", err)
-		}
-		a.debugLog("handleGetSales: %d receipts obtenidos de Loyverse API", len(receipts))
+	receipts, err := a.getReceipts(ctx, since, until)
+	if err != nil {
+		return nil, fmt.Errorf("get receipts: %w", err)
 	}
+	a.debugLog("handleGetSales: %d receipts obtenidos", len(receipts))
 
 	// Calcular métricas usando función PURA de Cortex
 	metrics := cortex.CalculateSalesMetrics(receipts)
@@ -74,8 +62,12 @@ func (a *Agent) handleGetSales(ctx context.Context, args map[string]any) (map[st
 	salesByMethod := make(map[string]float64)
 	refundsByMethod := make(map[string]float64)
 	for name, m := range metrics.ByPaymentMethod {
-		salesByMethod[name] = m.Sales
-		refundsByMethod[name] = m.Refunds
+		if m.Sales != 0 {
+			salesByMethod[name] = m.Sales
+		}
+		if m.Refunds != 0 {
+			refundsByMethod[name] = m.Refunds
+		}
 	}
 
 	result := map[string]any{
@@ -110,24 +102,24 @@ func (a *Agent) handleGetTopProducts(ctx context.Context, args map[string]any) (
 	}
 	a.debugLog("handleGetTopProducts: rango UTC since=%s until=%s", since.Format(time.RFC3339), until.Format(time.RFC3339))
 
-	receipts, err := a.loyverse.GetAllReceipts(ctx, since, until)
+	receipts, err := a.getReceipts(ctx, since, until)
 	if err != nil {
 		return nil, fmt.Errorf("get receipts: %w", err)
 	}
 	a.debugLog("handleGetTopProducts: %d receipts, filtrando...", len(receipts))
 
-	items, err := a.loyverse.GetAllItems(ctx)
+	items, err := a.getItems(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get items: %w", err)
 	}
 
-	catResp, err := a.loyverse.GetCategories(ctx)
+	cats, err := a.getCategories(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get categories: %w", err)
 	}
 
-	catNames := make(map[string]string, len(catResp.Categories))
-	for _, c := range catResp.Categories {
+	catNames := make(map[string]string, len(cats))
+	for _, c := range cats {
 		catNames[c.ID] = c.Name
 	}
 
@@ -221,7 +213,7 @@ func (a *Agent) handleGetShiftExpenses(ctx context.Context, args map[string]any)
 		return nil, err
 	}
 
-	shifts, err := a.loyverse.GetAllShifts(ctx, since, until)
+	shifts, err := a.getShifts(ctx, since, until)
 	if err != nil {
 		return nil, fmt.Errorf("get shifts: %w", err)
 	}
@@ -267,7 +259,7 @@ func (a *Agent) handleGetSupplierPayments(ctx context.Context, args map[string]a
 		return nil, err
 	}
 
-	shifts, err := a.loyverse.GetAllShifts(ctx, since, until)
+	shifts, err := a.getShifts(ctx, since, until)
 	if err != nil {
 		return nil, fmt.Errorf("get shifts: %w", err)
 	}
@@ -310,23 +302,23 @@ func (a *Agent) handleGetSupplierPayments(ctx context.Context, args map[string]a
 
 // handleGetStock retorna los niveles de stock actuales.
 func (a *Agent) handleGetStock(ctx context.Context, args map[string]any) (map[string]any, error) {
-	inventory, err := a.loyverse.GetAllInventory(ctx)
+	inventory, err := a.getInventory(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get inventory: %w", err)
 	}
 
-	items, err := a.loyverse.GetAllItems(ctx)
+	items, err := a.getItems(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get items: %w", err)
 	}
 
-	catResp, err := a.loyverse.GetCategories(ctx)
+	cats, err := a.getCategories(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get categories: %w", err)
 	}
 
-	catNames := make(map[string]string, len(catResp.Categories))
-	for _, c := range catResp.Categories {
+	catNames := make(map[string]string, len(cats))
+	for _, c := range cats {
 		catNames[c.ID] = c.Name
 	}
 
@@ -414,4 +406,51 @@ func intArg(args map[string]any, key string, defaultVal int) int {
 	default:
 		return defaultVal
 	}
+}
+
+// --- Helpers de fuente de datos (DB si disponible, Loyverse como fallback) ---
+
+// getReceipts retorna receipts del rango, usando DB local si está disponible.
+func (a *Agent) getReceipts(ctx context.Context, since, until time.Time) ([]loyverse.Receipt, error) {
+	if a.store != nil {
+		return a.store.GetReceiptsByDateRange(ctx, since, until)
+	}
+	return a.loyverse.GetAllReceipts(ctx, since, until)
+}
+
+// getShifts retorna shifts del rango, usando DB local si está disponible.
+func (a *Agent) getShifts(ctx context.Context, since, until time.Time) ([]loyverse.Shift, error) {
+	if a.store != nil {
+		return a.store.GetShiftsByDateRange(ctx, since, until)
+	}
+	return a.loyverse.GetAllShifts(ctx, since, until)
+}
+
+// getItems retorna todos los items, usando DB local si está disponible.
+func (a *Agent) getItems(ctx context.Context) ([]loyverse.Item, error) {
+	if a.store != nil {
+		return a.store.GetAllItems(ctx)
+	}
+	return a.loyverse.GetAllItems(ctx)
+}
+
+// getCategories retorna todas las categorías, usando DB local si está disponible.
+// Normaliza a []loyverse.Category independientemente de la fuente.
+func (a *Agent) getCategories(ctx context.Context) ([]loyverse.Category, error) {
+	if a.store != nil {
+		return a.store.GetAllCategories(ctx)
+	}
+	resp, err := a.loyverse.GetCategories(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Categories, nil
+}
+
+// getInventory retorna todos los niveles de inventario, usando DB local si está disponible.
+func (a *Agent) getInventory(ctx context.Context) ([]loyverse.InventoryLevel, error) {
+	if a.store != nil {
+		return a.store.GetAllInventoryLevels(ctx)
+	}
+	return a.loyverse.GetAllInventory(ctx)
 }

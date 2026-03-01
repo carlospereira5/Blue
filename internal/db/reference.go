@@ -60,7 +60,7 @@ func (s *SQLStore) UpsertEmployees(ctx context.Context, emps []loyverse.Employee
 	for _, e := range emps {
 		_, err := tx.ExecContext(ctx, q,
 			e.ID, e.Name, nullString(e.Email), nullString(e.PhoneNumber),
-			nullString(joinStrings(e.Stores)), boolToInt(e.IsOwner),
+			nullString(joinStrings(e.Stores)), e.IsOwner,
 			formatTime(e.CreatedAt), formatTime(e.UpdatedAt), formatTimePtr(e.DeletedAt),
 		)
 		if err != nil {

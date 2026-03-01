@@ -65,7 +65,7 @@ func (s *SQLStore) upsertReceiptBatch(ctx context.Context, receipts []loyverse.R
 	lineQ := fmt.Sprintf(`INSERT INTO line_items (receipt_id, item_id, variant_id, item_name,
 		variant_name, sku, quantity, price, gross_total_money, total_money, cost, cost_total,
 		total_discount, line_note)
-		VALUES (%s)`,
+		VALUES (%s) RETURNING id`,
 		s.dialect.Placeholders(1, 14),
 	)
 
@@ -110,19 +110,14 @@ func (s *SQLStore) upsertReceiptBatch(ctx context.Context, receipts []loyverse.R
 
 		// Insert line items and their children
 		for _, li := range r.LineItems {
-			res, err := tx.ExecContext(ctx, lineQ,
+			var lineItemID int64
+			if err := tx.QueryRowContext(ctx, lineQ,
 				r.ID, li.ItemID, nullString(li.VariantID), li.ItemName,
 				nullString(li.VariantName), nullString(li.SKU),
 				li.Quantity, li.Price, li.GrossTotalMoney, li.TotalMoney,
 				li.Cost, li.CostTotal, li.TotalDiscount, nullString(li.LineNote),
-			)
-			if err != nil {
+			).Scan(&lineItemID); err != nil {
 				return fmt.Errorf("db: insert line item: %w", err)
-			}
-
-			lineItemID, err := res.LastInsertId()
-			if err != nil {
-				return fmt.Errorf("db: last insert id: %w", err)
 			}
 
 			for _, t := range li.LineTaxes {

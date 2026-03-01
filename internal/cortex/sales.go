@@ -78,7 +78,6 @@ func CalculateSalesMetrics(receipts []loyverse.Receipt) SalesMetrics {
 		} else {
 			m.SalesCount++
 			m.GrossSales += totalMoney
-			m.NetSales += totalMoney - r.TotalDiscount
 			m.TotalTax += r.TotalTax
 			m.TotalDiscount += r.TotalDiscount
 			m.TotalTip += r.Tip

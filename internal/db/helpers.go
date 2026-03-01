@@ -20,8 +20,20 @@ func formatTimePtr(t *time.Time) sql.NullString {
 }
 
 func parseTime(s string) time.Time {
-	t, _ := time.Parse(timeFormat, s)
-	return t
+	if s == "" {
+		return time.Time{}
+	}
+	// Primary format (used by SQLite TEXT columns)
+	t, err := time.Parse(timeFormat, s)
+	if err == nil {
+		return t
+	}
+	// RFC3339Nano: returned by database/sql when scanning PostgreSQL TIMESTAMPTZ into *string
+	t, err = time.Parse(time.RFC3339Nano, s)
+	if err == nil {
+		return t.UTC()
+	}
+	return time.Time{}
 }
 
 func parseNullTime(ns sql.NullString) *time.Time {

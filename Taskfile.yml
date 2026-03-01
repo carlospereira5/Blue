@@ -1,6 +1,38 @@
-version: '3'
+version: "3"
 
 tasks:
+  context:
+    desc: "Agrega contexto (CLAUDE.md, plan, checkpoints) y archivos Go al portapapeles."
+    cmds:
+      - |
+        nu -c '
+          # 1. Parsear los archivos fuente pasados como argumentos
+          let raw_args = "{{.CLI_ARGS}}"
+          let args = if ($raw_args == "<no value>" or $raw_args == "") { [] } else { $raw_args | split row " " | where { |it| $it != "" } }
+          
+          # 2. Cargar contexto estático y dinámico del proyecto
+          let base = (open CLAUDE.md | default "No se encontró CLAUDE.md")
+          let plan = (open plan.md | default "No se encontró plan.md")
+          let checkpoint = (open docs/chatbot_checkpoint_v2.md | default "No se encontró el checkpoint")
+          
+          # 3. Leer y concatenar el código fuente solicitado en memoria
+          let code = if ($args | is-empty) { 
+              "No se solicitó código fuente." 
+          } else { 
+              $args | each { |f| 
+                  $"// --- Archivo: ($f) ---\n(open $f | into string)\n" 
+              } | str join "\n" 
+          }
+          
+          # 4. Construir payload y volcar al portapapeles de X11/Wayland
+          let payload = $"# ESTÁNDARES\n($base)\n\n# PLAN\n($plan)\n\n# ÚLTIMO CHECKPOINT\n($checkpoint)\n\n# CÓDIGO OBJETIVO\n($code)"
+          
+          $payload | xclip -selection clipboard
+          
+          let size = ($payload | str length)
+          print $"[+] Contexto cargado. Buffer X11: ($size) bytes transferidos."
+        '
+
   blue:
     desc: "Ejecuta todos los tests (comando principal)"
     cmds:
@@ -44,3 +76,19 @@ tasks:
     cmds:
       - go mod tidy
 
+  test:pg:
+    desc: "Integration tests con PostgreSQL (requiere pg:up)"
+    env:
+      TEST_PG_DSN: "postgres://blue:blue_password@localhost:5432/blue_db"
+    cmds:
+      - go test ./internal/db/... -tags integration -v -count=1
+
+  pg:up:
+    desc: "Levanta PostgreSQL via docker compose"
+    cmds:
+      - docker compose up -d
+
+  pg:down:
+    desc: "Baja PostgreSQL"
+    cmds:
+      - docker compose down

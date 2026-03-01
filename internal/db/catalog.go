@@ -98,8 +98,8 @@ func (s *SQLStore) UpsertItems(ctx context.Context, items []loyverse.Item) error
 		_, err := tx.ExecContext(ctx, itemQ,
 			item.ID, item.ItemName, nullString(item.Handle), nullString(item.ReferenceID),
 			nullString(item.Description), nullString(item.CategoryID),
-			boolToInt(item.TrackStock), item.Price, item.Cost,
-			boolToInt(item.IsArchived), boolToInt(item.HasVariations),
+			item.TrackStock, item.Price, item.Cost,
+			item.IsArchived, item.HasVariations,
 			nullString(item.ImageURL),
 			formatTime(item.CreatedAt), formatTime(item.UpdatedAt),
 		)
@@ -114,7 +114,7 @@ func (s *SQLStore) UpsertItems(ctx context.Context, items []loyverse.Item) error
 		for _, v := range item.Variants {
 			_, err := tx.ExecContext(ctx, variantQ,
 				v.ID, v.ItemID, nullString(v.Name), nullString(v.Sku),
-				nullString(v.Barcode), v.Price, v.Cost, boolToInt(v.IsArchived),
+				nullString(v.Barcode), v.Price, v.Cost, v.IsArchived,
 			)
 			if err != nil {
 				return fmt.Errorf("db: insert variant %s: %w", v.ID, err)
@@ -139,11 +139,10 @@ func (s *SQLStore) GetAllItems(ctx context.Context) ([]loyverse.Item, error) {
 	for rows.Next() {
 		var it loyverse.Item
 		var handle, refID, desc, catID, imageURL sql.NullString
-		var trackStock, isArchived, hasVariations int
 		var createdAt, updatedAt string
 		if err := rows.Scan(
 			&it.ID, &it.ItemName, &handle, &refID, &desc, &catID,
-			&trackStock, &it.Price, &it.Cost, &isArchived, &hasVariations, &imageURL,
+			&it.TrackStock, &it.Price, &it.Cost, &it.IsArchived, &it.HasVariations, &imageURL,
 			&createdAt, &updatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("db: scan item: %w", err)
@@ -152,9 +151,6 @@ func (s *SQLStore) GetAllItems(ctx context.Context) ([]loyverse.Item, error) {
 		it.ReferenceID = scanNullString(refID)
 		it.Description = scanNullString(desc)
 		it.CategoryID = scanNullString(catID)
-		it.TrackStock = intToBool(trackStock)
-		it.IsArchived = intToBool(isArchived)
-		it.HasVariations = intToBool(hasVariations)
 		it.ImageURL = scanNullString(imageURL)
 		it.CreatedAt = parseTime(createdAt)
 		it.UpdatedAt = parseTime(updatedAt)
@@ -191,14 +187,12 @@ func scanVariants(rows *sql.Rows) ([]loyverse.Variation, error) {
 	for rows.Next() {
 		var v loyverse.Variation
 		var name, sku, barcode sql.NullString
-		var isArchived int
-		if err := rows.Scan(&v.ID, &v.ItemID, &name, &sku, &barcode, &v.Price, &v.Cost, &isArchived); err != nil {
+		if err := rows.Scan(&v.ID, &v.ItemID, &name, &sku, &barcode, &v.Price, &v.Cost, &v.IsArchived); err != nil {
 			return nil, fmt.Errorf("db: scan variant: %w", err)
 		}
 		v.Name = scanNullString(name)
 		v.Sku = scanNullString(sku)
 		v.Barcode = scanNullString(barcode)
-		v.IsArchived = intToBool(isArchived)
 		result = append(result, v)
 	}
 	return result, rows.Err()

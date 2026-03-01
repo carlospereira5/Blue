@@ -569,3 +569,74 @@ func CalculateSalesMetrics(receipts []loyverse.Receipt) SalesMetrics {
 | 🔴 Alta   | Más funciones Cortex     | Agregar CalculateTopProducts, CalculateInventoryValuation, etc.           |
 | 🔴 Alta   | Refactorizar más handlers| handleGetTopProducts, handleGetStock, handleGetShiftExpenses → Cortex → DB |
 | 🟡 Media  | Tests de integración PG  | `_integration_test.go` con build tag `//go:build integration`             |
+
+## [2026-02-28] Sesión: PostgreSQL Integration Tests + Migración completa de handlers a DB
+
+### Qué se hizo
+
+1. **Integration tests contra PostgreSQL real** (`internal/db/integration_test.go`): 18 tests con build tag `//go:build integration` que cubren todas las entidades del schema (SyncMeta, PaymentTypes, Categories, Items+variants, InventoryLevels, Receipts, Shifts, Stores, Employees, Suppliers, UpsertEmpty). Setup: `truncateAll()` con `RESTART IDENTITY CASCADE` entre tests. Ejecutar con `task test:pg`.
+
+2. **Bugfixes descubiertos durante los PG tests:**
+   - `internal/db/helpers.go`: `parseTime()` ya tenía el fallback RFC3339Nano (para TIMESTAMPTZ → string vía database/sql)
+   - `internal/db/receipt.go`: `LastInsertId()` no soportado por pgx → cambiado a `INSERT ... RETURNING id` con `QueryRowContext + Scan`
+   - `internal/db/catalog.go`: `boolToInt()` retorna `int` pero PostgreSQL BOOLEAN necesita `bool`. Cambiados write path (upsert) y read path (scan directo en `*bool` en vez de `*int`)
+   - `internal/db/reference.go`: Mismo fix en `UpsertEmployees` para campo `is_owner`
+   - `internal/db/sync_meta.go`: `GetSyncMeta` usaba `time.Parse(timeFormat, ...)` directo — no pasaba por `parseTime()` y no tenía el fallback RFC3339Nano. Cambiado a `parseTime(lastSync)`
+
+3. **Migración de handlers a DB-first** (`internal/agent/handlers.go`): Refactorizado completo con 5 helpers privados (`getReceipts`, `getShifts`, `getItems`, `getCategories`, `getInventory`). Cada helper implementa el patrón DB-first: si `a.store != nil` lee de DB, sino fallback a Loyverse API. Los 4 handlers restantes (`handleGetTopProducts`, `handleGetShiftExpenses`, `handleGetSupplierPayments`, `handleGetStock`) ahora usan estos helpers.
+
+4. **Taskfile** (`Taskfile.yml`): Agregados `task test:pg` (integration tests con PG), `task pg:up` (docker compose up -d) y `task pg:down` (docker compose down).
+
+### Archivos modificados/creados
+
+- `internal/db/integration_test.go` — **NUEVO**: 18 tests contra PostgreSQL real con build tag `integration`
+- `internal/db/helpers.go` — `parseTime()` ya tiene fallback RFC3339Nano (estado correcto)
+- `internal/db/receipt.go` — `LastInsertId()` → `RETURNING id` con `QueryRowContext`
+- `internal/db/catalog.go` — Bool write/read path: `boolToInt()` → `bool` directo en todo UpsertItems/scanVariants/GetAllItems
+- `internal/db/reference.go` — `boolToInt(e.IsOwner)` → `e.IsOwner` en UpsertEmployees
+- `internal/db/sync_meta.go` — `time.Parse(timeFormat, ...)` → `parseTime()` + removed `"time"` import
+- `internal/agent/handlers.go` — 5 helpers DB-first + todos los handlers migrados
+- `Taskfile.yml` — Agregados `test:pg`, `pg:up`, `pg:down`
+
+### Decisiones de diseño
+
+1. **bool vs boolToInt**: PostgreSQL BOOLEAN necesita `bool` en el wire protocol (pgx no puede codificar `int` en OID 16). SQLite también acepta `bool` (database/sql lo convierte a int64). Escanear BOOLEAN desde PostgreSQL en `*bool` es necesario porque `convertAssign(bool → *int)` usa `strconv.ParseInt("true", 10, ...)` que falla. La solución unificada es usar `bool` en todos lados.
+2. **parseTime() como punto único de parsing**: El parser debe manejar ambos formatos: `"2006-01-02T15:04:05.000Z"` (SQLite TEXT) y RFC3339Nano (TIMESTAMPTZ → string vía database/sql). NO usar `time.Parse()` directo en ningún archivo del paquete `db`.
+3. **RETURNING id para SERIAL**: pgx no soporta `LastInsertId()`. Para columnas `SERIAL PRIMARY KEY` se usa `INSERT ... RETURNING id` + `QueryRowContext`.
+
+### Verificación
+
+- `go test ./... -count=1` — **Todos los tests existentes PASS** (67+)
+- `TEST_PG_DSN=... go test ./internal/db/... -tags integration -v -count=1` — **18/18 PG tests PASS**
+- `go vet ./...` — sin errores
+
+### Estado al cierre
+
+| Módulo                    | Componente | Estado                                                  |
+| ------------------------- | ---------- | ------------------------------------------------------- |
+| Loyverse API client       | Compartido | ✅ Completo — 34 tests (read endpoints)                 |
+| Config                    | Compartido | ✅ Completo — con DB/Sync config                        |
+| LLM client (Groq/Gemini)  | Aria       | ✅ Completo                                             |
+| Agent + macro-tools       | Aria       | ✅ v2 — DB-first completo (5 helpers, 5 handlers)       |
+| Multi-turn memory         | Aria       | ✅ Completo                                             |
+| Retry/Resilience          | Aria       | ✅ Completo                                             |
+| Voice-to-text (Whisper)   | Aria       | ✅ Completo                                             |
+| WhatsApp bot (pure Go)    | Aria       | ✅ Completo — CGO eliminado                             |
+| DB package (interfaz+impl)| Compartido | ✅ Completo — 18 SQLite + 18 PG integration tests       |
+| Sync service              | Compartido | ✅ Completo — 5 tests, incremental + full               |
+| Integración main.go       | Blue       | ✅ Completo — DB + Sync + Agent                         |
+| Cortex (sales)            | Cortex     | ✅ Iniciado — CalculateSalesMetrics                     |
+| Cortex: FIFO inventory    | Cortex     | 🔴 No iniciado                                          |
+| Cortex: Accounting        | Cortex     | 🔴 No iniciado                                          |
+| Cortex: Demand forecast   | Cortex     | 🔴 No iniciado                                          |
+| Admin CLI (Bubble Tea)    | Aria       | 🔴 No iniciado                                          |
+| Loyverse write endpoints  | Compartido | 🔴 No iniciado                                          |
+| Web dashboard             | Blue       | 🔴 No iniciado (fase final)                             |
+
+### Próximos pasos
+
+| Prioridad | Tarea                          | Descripción                                                              |
+| --------- | ------------------------------ | ------------------------------------------------------------------------ |
+| 🔴 Alta   | Más funciones Cortex           | CalculateTopProducts, CalculateInventoryValuation, CalculateShiftExpenses |
+| 🔴 Alta   | Handlers → Cortex              | Delegar lógica de handlers a funciones puras en Cortex                  |
+| 🟡 Media  | Deploy Termux (Android)        | Compilar ARM64, instalar Infisical, ejecutar en producción real          |

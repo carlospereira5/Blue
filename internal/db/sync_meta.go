@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 )
 
 func (s *SQLStore) GetSyncMeta(ctx context.Context, entity string) (SyncMeta, error) {
@@ -25,7 +24,7 @@ func (s *SQLStore) GetSyncMeta(ctx context.Context, entity string) (SyncMeta, er
 		return SyncMeta{}, fmt.Errorf("db: get sync meta %q: %w", entity, err)
 	}
 
-	meta.LastSyncAt, _ = time.Parse(timeFormat, lastSync)
+	meta.LastSyncAt = parseTime(lastSync)
 	meta.Cursor = scanNullString(cursor)
 	return meta, nil
 }
