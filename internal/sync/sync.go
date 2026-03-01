@@ -15,8 +15,8 @@ import (
 // overlap is re-fetched each cycle to catch late-arriving refunds/updates.
 const overlap = 24 * time.Hour
 
-// maxInitialWindow is the maximum history to fetch on first sync (Loyverse free tier limit).
-const maxInitialWindow = 31 * 24 * time.Hour
+// maxInitialWindow is the maximum history to fetch on first sync (30 days to avoid 402 paywall).
+const maxInitialWindow = 30 * 24 * time.Hour
 
 // Store defines the subset of db.Store that the sync service needs.
 type Store interface {

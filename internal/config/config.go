@@ -49,7 +49,7 @@ func Load() (*Config, error) {
 		AllowedNumbers:   parseCSV(getEnv("ALLOWED_NUMBERS", "")),
 		WhatsAppGroupJID: getEnv("WHATSAPP_GROUP_JID", ""),
 		DBDriver:         getEnv("DB_DRIVER", "sqlite"),
-		DBDSN:            getEnv("DB_DSN", "blue.db"),
+		DBDSN:            getEnv("DB_DSN", "blue.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"),
 		SyncInterval:     getEnvInt("SYNC_INTERVAL", 120),
 	}
 

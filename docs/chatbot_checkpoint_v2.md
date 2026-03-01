@@ -475,4 +475,97 @@ Se integró DB y Sync en `cmd/bot/main.go` completando el círculo del sistema B
 | Prioridad | Tarea                       | Descripción                                                                 |
 | --------- | --------------------------- | --------------------------------------------------------------------------- |
 | 🔴 Alta   | Implementar paquete `cortex` | Extraer lógica de `handlers.go` a funciones puras que lean de `db.Store`. |
-| 🔴 Alta   | Refactorizar macro-tools    | Handlers en `agent/` delegan a Cortex → DB en vez de Loyverse directo.    |
+| 🔴 Alta   | Refactorizar macro-tools    | Handlers en `agent/` delegan a Cortex → DB en vez de Loyverse directo.   |
+
+## [2026-03-01] Sesión: Bugfixes + Nacimiento de Cortex
+
+### Qué se hizo
+
+1. **Bugfixes operativos:**
+   - `maxInitialWindow` en sync.go: 31 → 30 días para evitar error 402 de Loyverse
+   - SQLite WAL mode: agregado `_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)` en config.go y bot.go
+
+2. **Nacimiento de Cortex:**
+   - Creado `internal/cortex/sales.go` con función pura `CalculateSalesMetrics()`
+   - Struct `SalesMetrics` con gross/net sales, refunds, taxes, tips, y desglose por payment method
+
+3. **Refactor de handleGetSales:**
+   - Ahora usa `a.store.GetReceiptsByDateRange()` en lugar de `a.loyverse.GetAllReceipts()`
+   - Fallback a Loyverse API si no hay store (modo legacy)
+   - Delega cálculo a `cortex.CalculateSalesMetrics()`
+
+### Archivos modificados/creados
+
+- `internal/sync/sync.go` — Fix 31→30 días
+- `internal/config/config.go` — SQLite WAL pragmas
+- `internal/whatsapp/bot.go` — Verificado que ya tenía WAL pragmas
+- `internal/cortex/sales.go` — **NUEVO**: función pura CalculateSalesMetrics
+- `internal/agent/handlers.go` — Refactor handleGetSales para usar DB + Cortex
+- `internal/agent/handlers_test.go` — Actualizado para incluir Name en Payments del mock
+
+### Código destacado: CalculateSalesMetrics (Cortex)
+
+```go
+// CalculateSalesMetrics procesa una lista de receipts y calcula los totales.
+// Es una función PURA: no hace I/O, no accede a red ni DB.
+// Recibe datos en memoria, devuelve struct con resultados.
+func CalculateSalesMetrics(receipts []loyverse.Receipt) SalesMetrics {
+	m := SalesMetrics{
+		ByPaymentMethod: make(map[string]PaymentMethodMetrics),
+	}
+
+	for _, r := range receipts {
+		isRefund := r.ReceiptType == "REFUND"
+		
+		if isRefund {
+			m.RefundCount++
+			m.TotalRefund += totalMoney
+			// Desglosar reembolsos por método de pago...
+		} else {
+			m.SalesCount++
+			m.GrossSales += totalMoney
+			m.NetSales += totalMoney - r.TotalDiscount
+			// Desglosar ventas por método de pago...
+		}
+	}
+	
+	m.NetSales = m.GrossSales - m.TotalDiscount - m.TotalRefund
+	return m
+}
+```
+
+### Verificación
+
+- `go test ./... -count=1` — **Todos los tests PASS**
+- `CGO_ENABLED=0 go build ./cmd/bot/...` — compila exitosamente
+
+### Estado al cierre
+
+| Módulo                    | Componente | Estado                                        |
+| ------------------------- | ---------- | --------------------------------------------- |
+| Loyverse API client       | Compartido | ✅ Completo — 34 tests (read endpoints)       |
+| Config                   | Compartido | ✅ Completo — con DB/Sync config              |
+| LLM client (Groq/Gemini)  | Aria      | ✅ Completo                                   |
+| Agent + macro-tools       | Aria       | ✅ v2 — con soporte DB + Cortex              |
+| Multi-turn memory         | Aria       | ✅ Completo                                   |
+| Retry/Resilience          | Aria       | ✅ Completo                                   |
+| Voice-to-text (Whisper)   | Aria       | ✅ Completo                                   |
+| WhatsApp bot (pure Go)    | Aria       | ✅ Completo — CGO eliminado                   |
+| DB package (interfaz+impl)| Compartido | ✅ Completo — 18 tests, dual SQLite/PG        |
+| Sync service              | Compartido | ✅ Completo — 5 tests, incremental + full     |
+| Integración main.go       | Blue       | ✅ Completo — DB + Sync + Agent              |
+| **Cortex (sales)**        | **Cortex** | ✅ **Iniciado** — CalculateSalesMetrics        |
+| Cortex: FIFO inventory    | Cortex     | 🔴 No iniciado                               |
+| Cortex: Accounting        | Cortex     | 🔴 No iniciado                               |
+| Cortex: Demand forecast   | Cortex     | 🔴 No iniciado                               |
+| Admin CLI (Bubble Tea)    | Aria       | 🔴 No iniciado                               |
+| Loyverse write endpoints  | Compartido | 🔴 No iniciado                               |
+| Web dashboard             | Blue       | 🔴 No iniciado (fase final)                  |
+
+### Próximos pasos
+
+| Prioridad | Tarea                     | Descripción                                                                |
+| --------- | ------------------------- | ------------------------------------------------------------------------- |
+| 🔴 Alta   | Más funciones Cortex     | Agregar CalculateTopProducts, CalculateInventoryValuation, etc.           |
+| 🔴 Alta   | Refactorizar más handlers| handleGetTopProducts, handleGetStock, handleGetShiftExpenses → Cortex → DB |
+| 🟡 Media  | Tests de integración PG  | `_integration_test.go` con build tag `//go:build integration`             |

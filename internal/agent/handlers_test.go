@@ -41,8 +41,8 @@ func TestHandleGetSales(t *testing.T) {
 					ReceiptType:   "SALE",
 					TotalMoney:    1500,
 					Payments: []loyverse.Payment{
-						{PaymentTypeID: "pt-cash", MoneyAmount: 1000},
-						{PaymentTypeID: "pt-card", MoneyAmount: 500},
+						{PaymentTypeID: "pt-cash", Name: "Efectivo", MoneyAmount: 1000},
+						{PaymentTypeID: "pt-card", Name: "Tarjeta", MoneyAmount: 500},
 					},
 				},
 				{
@@ -50,7 +50,7 @@ func TestHandleGetSales(t *testing.T) {
 					ReceiptType:   "SALE",
 					TotalMoney:    800,
 					Payments: []loyverse.Payment{
-						{PaymentTypeID: "pt-cash", MoneyAmount: 800},
+						{PaymentTypeID: "pt-cash", Name: "Efectivo", MoneyAmount: 800},
 					},
 				},
 			},
@@ -115,7 +115,7 @@ func TestHandleGetSales_WithRefunds(t *testing.T) {
 					ReceiptType:   "SALE",
 					TotalMoney:    10000,
 					Payments: []loyverse.Payment{
-						{PaymentTypeID: "pt-cash", MoneyAmount: 10000},
+						{PaymentTypeID: "pt-cash", Name: "Efectivo", MoneyAmount: 10000},
 					},
 				},
 				{
@@ -123,7 +123,7 @@ func TestHandleGetSales_WithRefunds(t *testing.T) {
 					ReceiptType:   "REFUND",
 					TotalMoney:    2000,
 					Payments: []loyverse.Payment{
-						{PaymentTypeID: "pt-cash", MoneyAmount: 2000},
+						{PaymentTypeID: "pt-cash", Name: "Efectivo", MoneyAmount: 2000},
 					},
 				},
 				{
@@ -131,7 +131,7 @@ func TestHandleGetSales_WithRefunds(t *testing.T) {
 					ReceiptType:   "SALE",
 					TotalMoney:    5000,
 					Payments: []loyverse.Payment{
-						{PaymentTypeID: "pt-card", MoneyAmount: 5000},
+						{PaymentTypeID: "pt-card", Name: "Tarjeta", MoneyAmount: 5000},
 					},
 				},
 			},
@@ -454,7 +454,7 @@ func TestHandleGetShiftExpenses(t *testing.T) {
 func TestHandleGetSupplierPayments(t *testing.T) {
 	openedAt := time.Date(2026, 2, 25, 8, 0, 0, 0, time.UTC)
 	suppliers := map[string][]string{
-		"Coca Cola":    {"coca"},
+		"Coca Cola":   {"coca"},
 		"Lácteos Sur": {"lacteos", "leche"},
 	}
 

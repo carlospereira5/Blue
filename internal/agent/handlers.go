@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"blue/internal/cortex"
+	"blue/internal/loyverse"
 )
 
 // santiagoLoc es la timezone de Chile para parsear fechas del usuario.
@@ -40,6 +42,7 @@ func (a *Agent) ExecuteTool(ctx context.Context, name string, args map[string]an
 
 // handleGetSales agrega ventas por método de pago en el rango dado.
 // Separa ventas (SALE) de reembolsos (REFUND) para reportar correctamente.
+// Ahora usa la DB local via Cortex en lugar de la API de Loyverse.
 func (a *Agent) handleGetSales(ctx context.Context, args map[string]any) (map[string]any, error) {
 	since, until, err := parseDateRange(args)
 	if err != nil {
@@ -47,61 +50,48 @@ func (a *Agent) handleGetSales(ctx context.Context, args map[string]any) (map[st
 	}
 	a.debugLog("handleGetSales: rango UTC since=%s until=%s", since.Format(time.RFC3339), until.Format(time.RFC3339))
 
-	receipts, err := a.loyverse.GetAllReceipts(ctx, since, until)
-	if err != nil {
-		return nil, fmt.Errorf("get receipts: %w", err)
+	// Usar DB local en lugar de Loyverse API
+	var receipts []loyverse.Receipt
+	if a.store != nil {
+		receipts, err = a.store.GetReceiptsByDateRange(ctx, since, until)
+		if err != nil {
+			return nil, fmt.Errorf("get receipts from DB: %w", err)
+		}
+		a.debugLog("handleGetSales: %d receipts obtenidos de DB local", len(receipts))
+	} else {
+		// Fallback a Loyverse API si no hay store (modo legacy)
+		receipts, err = a.loyverse.GetAllReceipts(ctx, since, until)
+		if err != nil {
+			return nil, fmt.Errorf("get receipts: %w", err)
+		}
+		a.debugLog("handleGetSales: %d receipts obtenidos de Loyverse API", len(receipts))
 	}
-	a.debugLog("handleGetSales: %d receipts obtenidos de Loyverse", len(receipts))
 
-	ptResp, err := a.loyverse.GetPaymentTypes(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("get payment types: %w", err)
-	}
-	ptNames := make(map[string]string, len(ptResp.PaymentTypes))
-	for _, pt := range ptResp.PaymentTypes {
-		ptNames[pt.ID] = pt.Name
-	}
+	// Calcular métricas usando función PURA de Cortex
+	metrics := cortex.CalculateSalesMetrics(receipts)
 
+	// Construir respuesta compatible con el formato anterior
 	salesByMethod := make(map[string]float64)
 	refundsByMethod := make(map[string]float64)
-	var totalSales, totalRefunds float64
-	var saleCount, refundCount int
-
-	for _, r := range receipts {
-		isRefund := r.ReceiptType == "REFUND"
-		if isRefund {
-			refundCount++
-		} else {
-			saleCount++
-		}
-		for _, p := range r.Payments {
-			name := ptNames[p.PaymentTypeID]
-			if name == "" {
-				name = "Otro"
-			}
-			if isRefund {
-				refundsByMethod[name] += p.MoneyAmount
-				totalRefunds += p.MoneyAmount
-			} else {
-				salesByMethod[name] += p.MoneyAmount
-				totalSales += p.MoneyAmount
-			}
-		}
+	for name, m := range metrics.ByPaymentMethod {
+		salesByMethod[name] = m.Sales
+		refundsByMethod[name] = m.Refunds
 	}
 
-	a.debugLog("handleGetSales: ventas=%d ($%.0f) reembolsos=%d ($%.0f)", saleCount, totalSales, refundCount, totalRefunds)
-
 	result := map[string]any{
-		"ventas_brutas":        totalSales,
-		"reembolsos":           totalRefunds,
-		"ventas_netas":         totalSales - totalRefunds,
-		"ventas_por_metodo":    salesByMethod,
-		"cantidad_ventas":      saleCount,
-		"cantidad_reembolsos":  refundCount,
+		"ventas_brutas":       metrics.GrossSales,
+		"reembolsos":          metrics.TotalRefund,
+		"ventas_netas":        metrics.NetSales,
+		"ventas_por_metodo":   salesByMethod,
+		"cantidad_ventas":     metrics.SalesCount,
+		"cantidad_reembolsos": metrics.RefundCount,
 	}
 	if len(refundsByMethod) > 0 {
 		result["reembolsos_por_metodo"] = refundsByMethod
 	}
+
+	a.debugLog("handleGetSales: ventas=%d ($%.0f) reembolsos=%d ($%.0f)", metrics.SalesCount, metrics.GrossSales, metrics.RefundCount, metrics.TotalRefund)
+
 	return result, nil
 }
 
@@ -373,7 +363,7 @@ func (a *Agent) handleGetStock(ctx context.Context, args map[string]any) (map[st
 	}
 
 	return map[string]any{
-		"stock":          result,
+		"stock":           result,
 		"total_productos": len(result),
 	}, nil
 }
