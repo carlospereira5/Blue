@@ -29,7 +29,7 @@ Aria is an AGENT, not a chatbot. It doesn't just answer questions — it execute
 
 Cortex's correctness depends on an exact starting state (the "axiom") where POS data perfectly reflects physical reality — inventory counted, cash balanced, every sale registered. From that axiom, if every subsequent state transition is mathematically correct (Cortex has no logic bugs), then every future state is guaranteed to be true. Provable by induction. Cortex is only as good as its operational discipline.
 
-## What Blue Does — The Three Domains
+## What Aria Does — The Three Domains
 
 ### Domain 1: POS Administration (Loyverse management)
 
@@ -97,7 +97,9 @@ cmd/
 internal/
   config/             → Config from env vars (Infisical-injected)
   loyverse/           → Loyverse API client (I/O puro, sin logica)
-  agent/              → LLM integration + tool definitions + macro-tools (Aria)
+  agent/              → Slim orchestrator (agent.go)
+    agent/llm/        → LLM interfaces, types, SessionManager, retry decorators
+    agent/tools/      → DataReader, Executor, tool registry, handlers, suppliers
   whatsapp/           → whatsmeow wrapper (Aria)
   cortex/             → Business logic: pure functions, aggregations, calculations
   db/                 → Data access layer: CRUD operations, DB-agnostic interface
@@ -160,7 +162,7 @@ A background sync service mirrors Loyverse data into a local database. Aria quer
     Loyverse API → PostgreSQL/SQLite
 
 [Aria queries]
-    LLM → Macro-Tool → Cortex (business logic) → DB → response
+    LLM → Tool (agent/tools/) → Cortex (business logic) → DB → response
 ```
 
 Tradeoff: data may be up to N minutes stale. For a kiosk where users ask "how much did we sell today?", 2 minutes of staleness is operationally irrelevant.
@@ -249,7 +251,7 @@ See `.env.example` for the list of variables to add to your Infisical project.
 
 ## Module Structure
 
-Module name: `aria`. Import paths: `aria/internal/loyverse`, `aria/internal/config`, `aria/internal/agent`, `aria/internal/whatsapp`, `aria/internal/cortex`, `aria/internal/db`, `aria/internal/sync`.
+Module name: `aria`. Import paths: `aria/internal/loyverse`, `aria/internal/config`, `aria/internal/agent`, `aria/internal/agent/llm`, `aria/internal/agent/tools`, `aria/internal/whatsapp`, `aria/internal/cortex`, `aria/internal/db`, `aria/internal/sync`.
 
 ## Loyverse API Client (`internal/loyverse/`)
 
@@ -293,7 +295,7 @@ The WhatsApp interface uses **whatsmeow** (https://github.com/tulir/whatsmeow), 
 
 - Open source, zero API cost — connects via WhatsApp Web protocol
 - Requires linking a real phone number once via QR scan
-- Messages arrive → sent to LLM with tool definitions → LLM calls macro-tools → Cortex computes → response sent back via WhatsApp
+- Messages arrive → sent to LLM with tool definitions → LLM calls tools → tool handlers read DB/Loyverse + invoke Cortex → compact result returned to LLM → response sent back via WhatsApp
 
 ## LLM Integration (`internal/agent/`)
 
@@ -305,9 +307,9 @@ Supports multiple providers via the `LLM` interface:
 | Gemini | `google.golang.org/genai` | `gemini-2.5-flash` | Fallback |
 | Groq (Whisper) | `openai-go` | `whisper-large-v3-turbo` | Voice-to-text for WhatsApp audio |
 
-The LLM acts as the NLU layer — it interprets natural language queries and decides which macro-tool to call.
+The LLM acts as the NLU layer — it interprets natural language queries and decides which tool to call. The LLM NEVER sees raw data (receipts, line items, etc.) — only compact computed results (≤20 items, ≤1KB structs from Cortex).
 
-### Macro-Tools (current, to be refactored to use Cortex)
+### Tools (agent/tools/)
 
 | Tool | Description |
 |------|-------------|
@@ -316,6 +318,8 @@ The LLM acts as the NLU layer — it interprets natural language queries and dec
 | `get_shift_expenses` | Shift expenses (pay outs / cash_movements) |
 | `get_supplier_payments` | Supplier payments |
 | `get_stock` | Current stock levels |
+
+Tool handlers follow this pipeline: `DataReader.GetXxx()` (DB-first, Loyverse fallback) → `cortex.CalculateXxx()` (pure computation) → compact result map → LLM formats prose.
 
 ### Key implementation details
 
@@ -356,7 +360,7 @@ Secrets live in Infisical. See `.env.example` for the full list:
 | `OPENAI_BASE_URL` | yes if `PROVIDER=openai` | `https://api.groq.com/openai/v1` |
 | `GEMINI_API_KEY` | yes if `PROVIDER=gemini` | Google AI Studio key |
 | `DB_DRIVER` | no | `sqlite` (default) or `postgres` |
-| `DB_DSN` | no | Database connection string. Default: `blue.db` for SQLite |
+| `DB_DSN` | no | Database connection string. Default: `aria.db` for SQLite |
 | `SYNC_INTERVAL` | no | Sync frequency in seconds. Default: `120` (2 min) |
 | `WHATSAPP_DB_PATH` | no | Default: `whatsapp.db` |
 | `ALLOWED_NUMBERS` | no | CSV of E.164 numbers. Empty = CLI mode |
@@ -370,19 +374,17 @@ Secrets live in Infisical. See `.env.example` for the full list:
 | Module | Component | State |
 |--------|-----------|-------|
 | Loyverse API client | Shared | done — 34 tests, all read endpoints |
-| Config | Shared | done |
-| LLM client (Groq/Gemini) | Aria | done — JSON schema strict fix |
-| Agent + macro-tools | Aria | done (v1) — to be refactored to delegate to Cortex |
-| Multi-turn memory | Aria | done — SessionManager with TTL |
-| Retry/Resilience | Aria | done — exponential backoff decorator |
+| Config | Shared | done — DB_DRIVER, DB_DSN, SYNC_INTERVAL |
+| LLM client (Groq/Gemini) | Aria | done — in agent/llm/ (OpenAILLM + GeminiLLM) |
+| Agent + tools | Aria | done (v3) — agent/llm/ + agent/tools/, DataReader centralized |
+| Multi-turn memory | Aria | done — SessionManager in agent/llm/ |
+| Retry/Resilience | Aria | done — retrySession decorator in agent/llm/session.go |
 | Voice-to-text (Whisper) | Aria | done |
-| WhatsApp bot (whatsmeow) | Aria | done |
-| DB package (interface + SQLite) | Shared | not started |
-| Sync service (Loyverse → DB) | Shared | not started |
-| Cortex business logic | Cortex | not started |
-| Cortex: FIFO inventory | Cortex | not started |
-| Cortex: Accounting module | Cortex | not started |
-| Cortex: Demand forecasting | Cortex | not started |
+| WhatsApp bot (whatsmeow) | Aria | done — pure Go, CGO eliminated |
+| DB package (SQLite + PostgreSQL) | Shared | done — 18 SQLite + 18 PG integration tests |
+| Sync service (Loyverse → DB) | Shared | done — 5 tests, incremental + full sync |
+| Cortex: CalculateSalesMetrics | Cortex | done — pure function, no I/O |
+| Cortex: remaining functions | Cortex | not started (next priority) |
 | Admin CLI (Bubble Tea) | Aria | not started |
 | Loyverse write endpoints | Shared | not started |
 | Web dashboard | Aria | not started (final phase) |

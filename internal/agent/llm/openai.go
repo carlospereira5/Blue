@@ -1,4 +1,4 @@
-package agent
+package llm
 
 import (
 	"bytes"
@@ -22,21 +22,19 @@ func NewOpenAILLM(client *openai.Client, model string) *OpenAILLM {
 // Transcribe envía el audio OGG de WhatsApp al endpoint Whisper de Groq.
 func (o *OpenAILLM) Transcribe(ctx context.Context, audioData []byte) (string, error) {
 	req := openai.AudioRequest{
-		Model:    "whisper-large-v3-turbo", // Modelo ultrarrápido de Groq para audio
+		Model:    "whisper-large-v3-turbo",
 		Reader:   bytes.NewReader(audioData),
-		FilePath: "voice_note.ogg", // Indispensable para que la API parsee el codec Opus de WhatsApp
+		FilePath: "voice_note.ogg",
 		Format:   openai.AudioResponseFormatText,
 	}
-
 	resp, err := o.client.CreateTranscription(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("openai transcription: %w", err)
 	}
-
 	return resp.Text, nil
 }
 
-func (o *OpenAILLM) NewSession(ctx context.Context, systemPrompt string, tools []ToolDef) (Session, error) {
+func (o *OpenAILLM) NewSession(_ context.Context, systemPrompt string, tools []ToolDef) (Session, error) {
 	oTools := make([]openai.Tool, len(tools))
 	for i, t := range tools {
 		props := make(map[string]any)
@@ -47,21 +45,14 @@ func (o *OpenAILLM) NewSession(ctx context.Context, systemPrompt string, tools [
 			}
 			props[p.Name] = prop
 		}
-		
-		schema := map[string]any{
-			"type":       "object",
-			"properties": props,
-		}
-
+		schema := map[string]any{"type": "object", "properties": props}
 		if len(t.Required) > 0 {
 			schema["required"] = t.Required
 		}
-
 		schemaBytes, err := json.Marshal(schema)
 		if err != nil {
 			return nil, fmt.Errorf("marshaling tool schema: %w", err)
 		}
-
 		oTools[i] = openai.Tool{
 			Type: openai.ToolTypeFunction,
 			Function: &openai.FunctionDefinition{
@@ -72,12 +63,9 @@ func (o *OpenAILLM) NewSession(ctx context.Context, systemPrompt string, tools [
 		}
 	}
 
-	messages := make([]openai.ChatCompletionMessage, 0, 16)
-	messages = append(messages, openai.ChatCompletionMessage{
-		Role:    openai.ChatMessageRoleSystem,
-		Content: systemPrompt,
-	})
-
+	messages := []openai.ChatCompletionMessage{
+		{Role: openai.ChatMessageRoleSystem, Content: systemPrompt},
+	}
 	return &openAISession{
 		client:          o.client,
 		model:           o.model,
@@ -126,12 +114,10 @@ func (s *openAISession) do(ctx context.Context) (string, []ToolCall, error) {
 		Tools:       s.tools,
 		Temperature: 0.3,
 	}
-
 	resp, err := s.client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		return "", nil, fmt.Errorf("openai chat completion: %w", err)
 	}
-
 	if len(resp.Choices) == 0 {
 		return "", nil, fmt.Errorf("openai devolvió 0 choices")
 	}
@@ -143,18 +129,13 @@ func (s *openAISession) do(ctx context.Context) (string, []ToolCall, error) {
 		toolCalls := make([]ToolCall, len(msg.ToolCalls))
 		for i, tc := range msg.ToolCalls {
 			s.lastToolCallIDs[tc.Function.Name] = tc.ID
-
 			var args map[string]any
 			if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 				return "", nil, fmt.Errorf("parsing tool args: %w", err)
 			}
-			toolCalls[i] = ToolCall{
-				Name: tc.Function.Name,
-				Args: args,
-			}
+			toolCalls[i] = ToolCall{Name: tc.Function.Name, Args: args}
 		}
 		return "", toolCalls, nil
 	}
-
 	return msg.Content, nil, nil
 }

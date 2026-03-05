@@ -1,10 +1,9 @@
-package agent
+package tools
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 )
 
 // LoadSuppliers carga el mapa de proveedores y sus aliases desde un archivo JSON.
@@ -19,19 +18,4 @@ func LoadSuppliers(path string) (map[string][]string, error) {
 		return nil, fmt.Errorf("parsing suppliers JSON: %w", err)
 	}
 	return suppliers, nil
-}
-
-// MatchSupplier busca en el comment de un CashMovement si coincide con algún
-// alias de proveedor. Retorna el nombre del proveedor y true si hay match.
-// La búsqueda es case-insensitive y por substring.
-func MatchSupplier(comment string, suppliers map[string][]string) (string, bool) {
-	lower := strings.ToLower(comment)
-	for name, aliases := range suppliers {
-		for _, alias := range aliases {
-			if strings.Contains(lower, strings.ToLower(alias)) {
-				return name, true
-			}
-		}
-	}
-	return "", false
 }

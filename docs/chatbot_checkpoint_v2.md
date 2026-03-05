@@ -1,5 +1,56 @@
 # Aria — Project Checkpoint V2
 
+## [2026-03-05] Sesión: Cortex completo — 4 funciones puras + tests
+
+### Qué se hizo
+
+Se implementaron las 4 funciones Cortex faltantes: `CalculateTopProducts`, `CalculateShiftExpenses`, `CalculateSupplierPayments`, `CalculateStock`. Se movió `MatchSupplier` de `tools/suppliers.go` a `cortex/suppliers.go` (es función pura). Los 4 handlers en `tools/handlers.go` quedaron como wrappers delgados: I/O via DataReader → Cortex → format para LLM. Se agregaron tests table-driven para las 4 funciones nuevas (37 casos). Suite completa pasa: todos los paquetes verde, CGO_ENABLED=0 compila limpio.
+
+### Archivos modificados/creados
+
+- `internal/cortex/products.go` — **NUEVO**: `CalculateTopProducts` (top/bottom, filtro categoría, limit)
+- `internal/cortex/shifts.go` — **NUEVO**: `CalculateShiftExpenses` (PAY_OUT por turno)
+- `internal/cortex/suppliers.go` — **NUEVO**: `MatchSupplier` + `CalculateSupplierPayments` (alias matching)
+- `internal/cortex/stock.go` — **NUEVO**: `CalculateStock` (join inventory+items+cats, filtro categoría)
+- `internal/cortex/products_test.go` — **NUEVO**: 8 tests para CalculateTopProducts
+- `internal/cortex/shifts_test.go` — **NUEVO**: 6 tests para CalculateShiftExpenses
+- `internal/cortex/stock_test.go` — **NUEVO**: 7 tests para CalculateStock
+- `internal/cortex/suppliers_test.go` — Agregados 5 tests para CalculateSupplierPayments
+- `internal/agent/tools/handlers.go` — Refactor: 4 handlers delegan a Cortex (lógica eliminada)
+- `internal/agent/tools/suppliers.go` — Eliminado `MatchSupplier` (movido a cortex)
+- `internal/agent/tools/suppliers_test.go` — Eliminado `TestMatchSupplier` (movido a cortex)
+
+### Estado al cierre
+
+| Módulo | Componente | Estado |
+|--------|------------|--------|
+| Loyverse API client | Compartido | ✅ Completo — 34 tests |
+| Config | Compartido | ✅ Completo |
+| LLM client (Groq/Gemini) | Aria | ✅ Completo |
+| Agent + tools | Aria | ✅ v3 — handlers delegan a Cortex |
+| Multi-turn memory | Aria | ✅ Completo |
+| Retry/Resilience | Aria | ✅ Completo |
+| Voice-to-text (Whisper) | Aria | ✅ Completo |
+| WhatsApp bot (pure Go) | Aria | ✅ Completo |
+| DB package (SQLite + PG) | Compartido | ✅ Completo — 18+18 tests |
+| Sync service | Compartido | ✅ Completo — 5 tests |
+| Integración main.go | Aria | ✅ Completo |
+| **Cortex: todas las funciones** | **Cortex** | ✅ **Completo** — 5 funciones puras, 37+ tests |
+| Admin CLI (Bubble Tea) | Aria | 🔴 No iniciado |
+| Loyverse write endpoints | Compartido | 🔴 No iniciado |
+| Web dashboard | Aria | 🔴 No iniciado (fase final) |
+
+### Próximos pasos
+
+| Prioridad | Tarea | Descripción |
+|-----------|-------|-------------|
+| 🟡 Media | Expandir repertorio de tools | Nuevas tools más allá de las 5 actuales (ej: velocidad de venta, dead stock, flujo de caja) |
+| 🟡 Media | Admin CLI (Bubble Tea) | CLI para administración POS: bulk photo upload, estandarizar nombres |
+| 🔵 Baja | Loyverse write endpoints | CRUD de productos/categorías vía API |
+| 🔵 Baja | Web dashboard | Fase final — gráficos, deudas, inventario |
+
+---
+
 ## Estado Actual de la Arquitectura (v3 — Aria)
 
 ### Naming
@@ -55,7 +106,9 @@ cmd/
 internal/
   config/             → Config desde env vars (Infisical)
   loyverse/           → Cliente HTTP puro (I/O, sin lógica)
-  agent/              → LLM + tool definitions + macro-tools (Aria)
+  agent/              → Orquestador slim (agent.go)
+    agent/llm/        → Interfaces LLM y Session, tipos, SessionManager, retry
+    agent/tools/      → DataReader, Executor, registry de tools, handlers, suppliers
   whatsapp/           → whatsmeow wrapper (Aria)
   cortex/             → Lógica de negocio: funciones puras, sin I/O
   db/                 → Data access layer: CRUD, interfaz DB-agnostic
@@ -64,35 +117,145 @@ internal/
 
 ### Estado de los Módulos
 
-| Módulo                   | Componente | Estado                                        |
-| ------------------------ | ---------- | --------------------------------------------- |
-| Loyverse API client      | Compartido | ✅ Completo — 34 tests (read endpoints)       |
-| Config                   | Compartido | ✅ Completo                                   |
-| LLM client (Groq/Gemini) | Aria      | ✅ Completo — JSON schema strict fix          |
-| Agent + macro-tools      | Aria       | ✅ v1 funcional — pendiente refactor a Cortex |
-| Multi-turn memory        | Aria       | ✅ Completo — SessionManager con TTL          |
-| Retry/Resilience         | Aria       | ✅ Completo — exponential backoff decorator   |
-| Voice-to-text (Whisper)  | Aria       | ✅ Completo                                   |
-| WhatsApp bot             | Aria       | ✅ Completo                                   |
-| DB package (interfaz)    | Compartido | 🔴 No iniciado                               |
-| Sync service             | Compartido | 🔴 No iniciado                               |
-| Cortex business logic    | Cortex     | 🔴 No iniciado                               |
-| Cortex: FIFO inventory   | Cortex     | 🔴 No iniciado                               |
-| Cortex: Accounting       | Cortex     | 🔴 No iniciado                               |
-| Cortex: Demand forecast  | Cortex     | 🔴 No iniciado                               |
-| Admin CLI (Bubble Tea)   | Aria       | 🔴 No iniciado                               |
-| Loyverse write endpoints | Compartido | 🔴 No iniciado                               |
-| Web dashboard            | Blue       | 🔴 No iniciado (fase final)                  |
+| Módulo                    | Componente | Estado                                                     |
+| ------------------------- | ---------- | ---------------------------------------------------------- |
+| Loyverse API client       | Compartido | ✅ Completo — 34 tests (read endpoints)                    |
+| Config                    | Compartido | ✅ Completo — con DB/Sync config                           |
+| LLM client (Groq/Gemini)  | Aria       | ✅ Completo — en agent/llm/                                |
+| Agent + tools             | Aria       | ✅ v3 — sub-paquetes llm/ y tools/, DataReader centralizado |
+| Multi-turn memory         | Aria       | ✅ Completo — SessionManager en agent/llm/                 |
+| Retry/Resilience          | Aria       | ✅ Completo — retrySession en agent/llm/session.go         |
+| Voice-to-text (Whisper)   | Aria       | ✅ Completo                                                |
+| WhatsApp bot (pure Go)    | Aria       | ✅ Completo — CGO eliminado                                |
+| DB package (interfaz+impl)| Compartido | ✅ Completo — 18 SQLite + 18 PG integration tests          |
+| Sync service              | Compartido | ✅ Completo — 5 tests, incremental + full                  |
+| Integración main.go       | Aria       | ✅ Completo — DB + Sync + Agent                            |
+| Cortex (sales)            | Cortex     | ✅ Iniciado — CalculateSalesMetrics                        |
+| Cortex: funciones restantes | Cortex   | 🔴 No iniciado                                             |
+| Admin CLI (Bubble Tea)    | Aria       | 🔴 No iniciado                                             |
+| Loyverse write endpoints  | Compartido | 🔴 No iniciado                                             |
+| Web dashboard             | Aria       | 🔴 No iniciado (fase final)                                |
 
 ### Próximos Pasos Inmediatos
 
-| Prioridad | Tarea                               | Descripción                                                                                               |
-| --------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| 🔴 Alta   | Diseñar schema DB (mirror Loyverse) | Tablas para receipts, items, categories, shifts, inventory, payment_types. UPSERTs para sync incremental. |
-| 🔴 Alta   | Implementar paquete `db`            | Interfaz + implementación SQLite (no CGO). CRUD puro, sin lógica.                                        |
-| 🔴 Alta   | Implementar paquete `sync`          | Goroutine background, usa `loyverse/` para popular la DB. Incremental vía `updated_since`.                |
-| 🔴 Alta   | Implementar paquete `cortex`        | Extraer lógica de `handlers.go` a funciones puras.                                                        |
-| 🟡 Media  | Refactorizar macro-tools            | Handlers en `agent/` delegan a Cortex → DB en vez de Loyverse directo.                                   |
+| Prioridad | Tarea                             | Descripción                                                                                              |
+| --------- | --------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 🔴 Alta   | Cortex: CalculateTopProducts      | Función pura — top/bottom productos por ventas, con filtro de categoría opcional                         |
+| 🔴 Alta   | Cortex: CalculateShiftExpenses    | Función pura — gastos por turno desde cash_movements                                                     |
+| 🔴 Alta   | Cortex: CalculateSupplierPayments | Función pura — pagos a proveedores con alias matching                                                    |
+| 🔴 Alta   | Cortex: CalculateStock            | Función pura — niveles de inventario actuales                                                            |
+| 🔴 Alta   | Handlers → Cortex                 | handleGetTopProducts, handleGetShiftExpenses, handleGetSupplierPayments, handleGetStock delegan a Cortex |
+
+## [2026-03-05] Sesión: Diseño Nano-Tools + Refactor agent/ → agent/llm/ + agent/tools/
+
+### Qué se hizo
+
+Sesión de diseño arquitectónico y refactor masivo del paquete `internal/agent/`. Se discutió y acordó el principio fundamental: el LLM es un orquestador de intención puro — NUNCA ve datos crudos en su context window, solo resultados compactos computados por Cortex (≤20 items, ≤1KB). Se refactorizó `agent/` en dos sub-paquetes (`llm/` y `tools/`), eliminando la duplicación del patrón DB/Loyverse fallback (repetido 5 veces) y centralizándolo en la interfaz `DataReader`. Todos los 8 paquetes pasan tests. `CGO_ENABLED=0 go build` limpio.
+
+### Archivos modificados/creados
+
+- `internal/agent/llm/types.go` — **NUEVO**: tipos compartidos (ToolDef, ToolCall, ToolResult, ParamDef)
+- `internal/agent/llm/llm.go` — **NUEVO**: interfaces LLM y Session
+- `internal/agent/llm/session.go` — **NUEVO**: SessionManager + retrySession (exponential backoff) fusionados
+- `internal/agent/llm/gemini.go` — **MOVIDO**: GeminiLLM (de agent/gemini.go, package → llm)
+- `internal/agent/llm/openai.go` — **MOVIDO**: OpenAILLM (de agent/openai.go, package → llm)
+- `internal/agent/llm/session_test.go` — **MOVIDO**: test de retry (de agent/retry_test.go)
+- `internal/agent/tools/reader.go` — **NUEVO**: interfaz DataReader + fallbackReader (centraliza DB-first en UN lugar)
+- `internal/agent/tools/registry.go` — **NUEVO**: AriaTools() con descripciones mejoradas y anti-casos
+- `internal/agent/tools/executor.go` — **NUEVO**: Executor struct + dispatch + arg helpers (parseDateRange, stringArg, intArg)
+- `internal/agent/tools/handlers.go` — **NUEVO**: 5 handlers, todos usan e.reader.GetXxx()
+- `internal/agent/tools/suppliers.go` — **MOVIDO**: LoadSuppliers + MatchSupplier
+- `internal/agent/tools/suppliers_test.go` — **MOVIDO**: tests de suppliers (package tools_test)
+- `internal/agent/agent.go` — **REESCRITO**: orquestador slim (87 líneas)
+- `cmd/bot/main.go` — imports actualizados a agentllm y agenttools
+
+**Eliminados de agent/:** `llm.go`, `tools.go`, `handlers.go`, `session_manager.go`, `retry.go`, `suppliers.go`, `gemini.go`, `openai.go`, `suppliers_test.go`, `retry_test.go`
+
+### Decisiones de diseño
+
+1. **Dependencias sin ciclos**: `llm/` ← `tools/` ← `agent/`. El paquete llm/ tiene cero deps internas; tools/ importa llm/ para los tipos; agent/ importa ambos.
+2. **DataReader como interfaz canónica**: Único punto de acceso a datos. Nombres normalizados (GetReceipts, GetShifts, etc.) independiente del backend (DB o Loyverse).
+3. **LLM = orquestador puro**: El LLM NUNCA ve datos crudos. Solo recibe resultados compactos. Toda la matemática ocurre en Cortex. Todo el I/O ocurre en tools/ handlers vía DataReader.
+4. **agentConfig como Option target**: El patrón `WithDebug`, `WithStore` aplica sobre `agentConfig` antes de construir el Agent — la API pública no cambia.
+
+### Estado al cierre
+
+| Módulo                    | Componente | Estado                                                     |
+| ------------------------- | ---------- | ---------------------------------------------------------- |
+| Loyverse API client       | Compartido | ✅ Completo — 34 tests (read endpoints)                    |
+| Config                    | Compartido | ✅ Completo — con DB/Sync config                           |
+| LLM client (Groq/Gemini)  | Aria       | ✅ Completo — en agent/llm/                                |
+| Agent + tools             | Aria       | ✅ v3 — sub-paquetes llm/ y tools/, DataReader centralizado |
+| Multi-turn memory         | Aria       | ✅ Completo — SessionManager en agent/llm/                 |
+| Retry/Resilience          | Aria       | ✅ Completo — retrySession en agent/llm/session.go         |
+| Voice-to-text (Whisper)   | Aria       | ✅ Completo                                                |
+| WhatsApp bot (pure Go)    | Aria       | ✅ Completo — CGO eliminado                                |
+| DB package (interfaz+impl)| Compartido | ✅ Completo — 18 SQLite + 18 PG integration tests          |
+| Sync service              | Compartido | ✅ Completo — 5 tests, incremental + full                  |
+| Integración main.go       | Aria       | ✅ Completo — DB + Sync + Agent                            |
+| Cortex (sales)            | Cortex     | ✅ Iniciado — CalculateSalesMetrics                        |
+| Cortex: funciones restantes | Cortex   | 🔴 No iniciado                                             |
+| Admin CLI (Bubble Tea)    | Aria       | 🔴 No iniciado                                             |
+| Loyverse write endpoints  | Compartido | 🔴 No iniciado                                             |
+| Web dashboard             | Aria       | 🔴 No iniciado (fase final)                                |
+
+### Próximos pasos
+
+| Prioridad | Tarea                             | Descripción                                                                                              |
+| --------- | --------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 🔴 Alta   | Cortex: CalculateTopProducts      | Función pura — top/bottom productos por ventas, con filtro de categoría opcional                         |
+| 🔴 Alta   | Cortex: CalculateShiftExpenses    | Función pura — gastos por turno desde cash_movements                                                     |
+| 🔴 Alta   | Cortex: CalculateSupplierPayments | Función pura — pagos a proveedores con alias matching                                                    |
+| 🔴 Alta   | Cortex: CalculateStock            | Función pura — niveles de inventario actuales                                                            |
+| 🔴 Alta   | Handlers → Cortex                 | handleGetTopProducts, handleGetShiftExpenses, handleGetSupplierPayments, handleGetStock delegan a Cortex |
+
+## [2026-03-05] Sesión: Renaming Blue → Aria + Arquitectura v3 definitiva
+
+### Qué se hizo
+
+Renaming completo del módulo Go: `module blue` → `module aria`. Se actualizaron los 44 imports de `blue/internal/...` a `aria/internal/...` en todo el proyecto. Se reescribió `CLAUDE.md` con la arquitectura v3 definitiva: Aria como agente (no chatbot), arquitectura 2 capas (I/O + cómputo), decisión single-store, analogía Lambda para Cortex. Se documentó el orden de desarrollo acordado para las próximas sesiones.
+
+### Archivos modificados/creados
+
+- `go.mod` — `module blue` → `module aria`
+- `Taskfile.yml` — `task blue` → `task aria`, `bin/lumi` → `bin/aria`
+- `CLAUDE.md` — Reescritura sección arquitectura: Aria como agente, 2 capas, single-store, Lambda analogy
+- `docs/chatbot_checkpoint_v2.md` — Header con naming v3 y orden de desarrollo
+- `internal/loyverse/client.go` — Limpieza de logs de debug
+- `internal/db/receipt.go` — Limpieza de logs de debug
+- `internal/sync/sync.go` — Refactor menor post-rename
+- Todos los archivos `*.go` del proyecto — imports actualizados a `aria/internal/...`
+
+### Estado al cierre
+
+| Módulo                    | Componente | Estado                                                  |
+| ------------------------- | ---------- | ------------------------------------------------------- |
+| Loyverse API client       | Compartido | ✅ Completo — 34 tests (read endpoints)                 |
+| Config                    | Compartido | ✅ Completo — con DB/Sync config                        |
+| LLM client (Groq/Gemini)  | Aria       | ✅ Completo                                             |
+| Agent + macro-tools       | Aria       | ✅ v2 — DB-first completo (5 helpers, 5 handlers)       |
+| Multi-turn memory         | Aria       | ✅ Completo                                             |
+| Retry/Resilience          | Aria       | ✅ Completo                                             |
+| Voice-to-text (Whisper)   | Aria       | ✅ Completo                                             |
+| WhatsApp bot (pure Go)    | Aria       | ✅ Completo — CGO eliminado                             |
+| DB package (interfaz+impl)| Compartido | ✅ Completo — 18 SQLite + 18 PG integration tests       |
+| Sync service              | Compartido | ✅ Completo — 5 tests, incremental + full               |
+| Integración main.go       | Blue       | ✅ Completo — DB + Sync + Agent                         |
+| Cortex (sales)            | Cortex     | ✅ Iniciado — CalculateSalesMetrics                     |
+| Cortex: funciones restantes | Cortex   | 🔴 No iniciado                                          |
+| Admin CLI (Bubble Tea)    | Aria       | 🔴 No iniciado                                          |
+| Loyverse write endpoints  | Compartido | 🔴 No iniciado                                          |
+| Web dashboard             | Aria       | 🔴 No iniciado (fase final)                             |
+
+### Próximos pasos
+
+| Prioridad | Tarea                          | Descripción                                                                        |
+| --------- | ------------------------------ | ---------------------------------------------------------------------------------- |
+| 🔴 Alta   | Cortex: CalculateTopProducts   | Función pura — top/bottom productos por ventas, con filtro de categoría opcional   |
+| 🔴 Alta   | Cortex: CalculateShiftExpenses | Función pura — gastos por turno desde cash_movements                               |
+| 🔴 Alta   | Cortex: CalculateSupplierPayments | Función pura — pagos a proveedores con alias matching                           |
+| 🔴 Alta   | Cortex: CalculateStock         | Función pura — niveles de inventario actuales                                      |
+| 🔴 Alta   | Handlers → Cortex              | Migrar handleGetTopProducts, handleGetShiftExpenses, handleGetSupplierPayments, handleGetStock |
 
 ## [2026-02-26] Sesión: Fase B Completada — Memoria Multi-turno y Tolerancia a Fallos (Lumi v1.2)
 

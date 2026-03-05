@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"aria/internal/agent"
+	agentllm "aria/internal/agent/llm"
+	agenttools "aria/internal/agent/tools"
 	"aria/internal/config"
 	"aria/internal/db"
 	"aria/internal/loyverse"
@@ -53,13 +55,13 @@ func main() {
 	syncService := sync.New(store, loyClient, cfg.SyncInterval, nil, cfg.Debug)
 	go syncService.Start(ctx)
 
-	var llm agent.LLM
+	var llm agentllm.LLM
 
 	if cfg.Provider == "openai" {
 		apiConfig := openai.DefaultConfig(cfg.OpenAIAPIKey)
 		apiConfig.BaseURL = cfg.OpenAIBaseURL
 		openaiClient := openai.NewClientWithConfig(apiConfig)
-		llm = agent.NewOpenAILLM(openaiClient, "llama-3.3-70b-versatile")
+		llm = agentllm.NewOpenAILLM(openaiClient, "llama-3.3-70b-versatile")
 	} else {
 		geminiClient, err := genai.NewClient(ctx, &genai.ClientConfig{
 			APIKey:  cfg.GeminiAPIKey,
@@ -68,10 +70,10 @@ func main() {
 		if err != nil {
 			log.Fatalf("gemini client: %v", err)
 		}
-		llm = agent.NewGeminiLLM(geminiClient, "gemini-2.5-flash")
+		llm = agentllm.NewGeminiLLM(geminiClient, "gemini-2.5-flash")
 	}
 
-	suppliers, err := agent.LoadSuppliers(cfg.SuppliersFile)
+	suppliers, err := agenttools.LoadSuppliers(cfg.SuppliersFile)
 	if err != nil {
 		log.Printf("aviso: no se pudo cargar suppliers (%v) — UC5 no va a funcionar", err)
 		suppliers = make(map[string][]string)

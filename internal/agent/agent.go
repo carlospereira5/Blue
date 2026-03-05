@@ -1,3 +1,6 @@
+// Package agent es el orquestador central de Aria.
+// Conecta el LLM con las herramientas disponibles y gestiona el ciclo de vida
+// de las conversaciones. No contiene lógica de negocio ni acceso directo a datos.
 package agent
 
 import (
@@ -7,47 +10,58 @@ import (
 	"log"
 	"time"
 
+	agentllm "aria/internal/agent/llm"
+	agenttools "aria/internal/agent/tools"
 	"aria/internal/db"
 	"aria/internal/loyverse"
 )
 
-// Agent es el cerebro del chatbot Lumi. Conecta un LLM con Loyverse
-// usando function calling para responder consultas en lenguaje natural.
+// Agent orquesta el flujo conversacional de Aria:
+// recibe mensajes → gestiona sesión LLM → despacha tool calls → retorna respuesta.
 type Agent struct {
-	llm            LLM
-	loyverse       loyverse.Reader
-	store          db.Store // opcional: si está presente, se usa DB en lugar de Loyverse directo
-	suppliers      map[string][]string
+	llm            agentllm.LLM
+	executor       *agenttools.Executor
 	debug          bool
-	sessionManager *SessionManager
+	sessionManager *agentllm.SessionManager
 }
 
-// Option configura el Agent.
-type Option func(*Agent)
+// agentConfig acumula las opciones antes de construir el Agent.
+type agentConfig struct {
+	debug bool
+	store db.Store
+}
 
-// WithDebug activa el modo debug que logea todo el flujo interno.
+// Option configura el Agent en la construcción.
+type Option func(*agentConfig)
+
+// WithDebug activa el modo debug que loguea todo el flujo interno.
 func WithDebug(enabled bool) Option {
-	return func(a *Agent) { a.debug = enabled }
+	return func(c *agentConfig) { c.debug = enabled }
 }
 
-// WithStore inyecta la base de datos. Si está presente, los handlers
-// usarán la DB en lugar de consultar Loyverse directamente.
+// WithStore inyecta la base de datos local. Si está presente, el DataReader
+// preferirá la DB sobre Loyverse para todas las lecturas.
 func WithStore(store db.Store) Option {
-	return func(a *Agent) { a.store = store }
+	return func(c *agentConfig) { c.store = store }
 }
 
-// New crea un nuevo Agent listo para chatear.
-func New(llm LLM, loy loyverse.Reader, suppliers map[string][]string, opts ...Option) *Agent {
-	a := &Agent{
-		llm:       llm,
-		loyverse:  loy,
-		suppliers: suppliers,
-	}
+// New crea un Agent listo para chatear.
+// loy puede ser nil solo en tests donde no se llaman tools que lean datos.
+func New(l agentllm.LLM, loy loyverse.Reader, suppliers map[string][]string, opts ...Option) *Agent {
+	cfg := &agentConfig{}
 	for _, opt := range opts {
-		opt(a)
+		opt(cfg)
 	}
-	a.sessionManager = NewSessionManager(30*time.Minute, a.debug)
-	return a
+
+	reader := agenttools.NewFallbackReader(cfg.store, loy)
+	executor := agenttools.NewExecutor(reader, suppliers, cfg.debug)
+
+	return &Agent{
+		llm:            l,
+		executor:       executor,
+		debug:          cfg.debug,
+		sessionManager: agentllm.NewSessionManager(30*time.Minute, cfg.debug),
+	}
 }
 
 func (a *Agent) debugLog(format string, args ...any) {
@@ -56,21 +70,25 @@ func (a *Agent) debugLog(format string, args ...any) {
 	}
 }
 
-// TranscribeAudio utiliza el LLM subyacente para pasar una nota de voz a texto.
+// TranscribeAudio convierte una nota de voz (OGG) a texto usando el LLM.
 func (a *Agent) TranscribeAudio(ctx context.Context, audioData []byte) (string, error) {
 	return a.llm.Transcribe(ctx, audioData)
 }
 
-// Chat envía un mensaje al modelo, ejecuta el loop de function calling,
+// ExecuteTool despacha una tool call al executor. Público para testing.
+func (a *Agent) ExecuteTool(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
+	return a.executor.Execute(ctx, name, args)
+}
+
+// Chat envía un mensaje al LLM, ejecuta el loop de function calling,
 // y retorna la respuesta de texto final.
 func (a *Agent) Chat(ctx context.Context, userID, message string) (string, error) {
 	a.debugLog(">>> mensaje usuario (%s): %q", userID, message)
 
-	session, err := a.sessionManager.GetOrCreate(ctx, userID, a.llm, buildSystemPrompt(), lumiTools())
+	session, err := a.sessionManager.GetOrCreate(ctx, userID, a.llm, buildSystemPrompt(), agenttools.AriaTools())
 	if err != nil {
 		return "", fmt.Errorf("obteniendo sesión: %w", err)
 	}
-	a.debugLog("sesión LLM lista para %s", userID)
 
 	text, calls, err := session.Send(ctx, message)
 	if err != nil {
@@ -81,18 +99,17 @@ func (a *Agent) Chat(ctx context.Context, userID, message string) (string, error
 	for i := 0; i < 5 && len(calls) > 0; i++ {
 		a.debugLog("--- iteración %d: %d function call(s) ---", i, len(calls))
 
-		results := make([]ToolResult, len(calls))
+		results := make([]agentllm.ToolResult, len(calls))
 		for j, fc := range calls {
 			a.debugLog("TOOL CALL: %s(%s)", fc.Name, mustJSONString(fc.Args))
-
-			result, execErr := a.ExecuteTool(ctx, fc.Name, fc.Args)
+			result, execErr := a.executor.Execute(ctx, fc.Name, fc.Args)
 			if execErr != nil {
 				a.debugLog("TOOL ERROR: %s → %v", fc.Name, execErr)
 				result = map[string]any{"error": execErr.Error()}
 			} else {
 				a.debugLog("TOOL RESULT: %s → %s", fc.Name, truncate(mustJSONString(result), 500))
 			}
-			results[j] = ToolResult{Name: fc.Name, Result: result}
+			results[j] = agentllm.ToolResult{Name: fc.Name, Result: result}
 		}
 
 		text, calls, err = session.SendToolResults(ctx, results)
