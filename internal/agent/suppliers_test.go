@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"blue/internal/agent"
+	"aria/internal/agent"
 )
 
 func TestLoadSuppliers(t *testing.T) {

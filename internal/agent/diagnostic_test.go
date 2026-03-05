@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"blue/internal/agent"
-	"blue/internal/config"
-	"blue/internal/loyverse"
+	"aria/internal/agent"
+	"aria/internal/config"
+	"aria/internal/loyverse"
 )
 
 // ============================================================================

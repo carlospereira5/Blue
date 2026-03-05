@@ -7,8 +7,8 @@ import (
 	"log"
 	"time"
 
-	"blue/internal/db"
-	"blue/internal/loyverse"
+	"aria/internal/db"
+	"aria/internal/loyverse"
 )
 
 // Agent es el cerebro del chatbot Lumi. Conecta un LLM con Loyverse

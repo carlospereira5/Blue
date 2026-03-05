@@ -33,16 +33,16 @@ tasks:
           print $"[+] Contexto cargado. Buffer X11: ($size) bytes transferidos."
         '
 
-  blue:
+  aria:
     desc: "Ejecuta todos los tests (comando principal)"
     cmds:
       - go test ./... -v -count=1
     dir: "{{.ROOT_DIR}}"
 
   test:
-    desc: "Alias de blue - ejecuta todos los tests"
+    desc: "Alias de aria - ejecuta todos los tests"
     cmds:
-      - task: blue
+      - task: aria
 
   test:short:
     desc: "Tests sin output verbose"
@@ -60,11 +60,11 @@ tasks:
       - infisical run -- sh -c 'ALLOWED_NUMBERS="" go run ./cmd/bot/main.go'
 
   build:
-    desc: "Compila el binario de Lumi"
+    desc: "Compila el binario de Aria"
     cmds:
-      - go build -o bin/lumi ./cmd/bot/main.go
+      - go build -o bin/aria ./cmd/bot/main.go
     generates:
-      - bin/lumi
+      - bin/aria
 
   lint:
     desc: "Lint con go vet"

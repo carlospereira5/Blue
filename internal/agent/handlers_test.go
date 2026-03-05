@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"blue/internal/agent"
-	"blue/internal/loyverse"
+	"aria/internal/agent"
+	"aria/internal/loyverse"
 )
 
 // testAgent crea un Agent con un Loyverse client apuntando al servidor de test.

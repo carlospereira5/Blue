@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"blue/internal/loyverse"
+	"aria/internal/loyverse"
 )
 
 func (s *SQLStore) UpsertStores(ctx context.Context, stores []loyverse.Store) error {

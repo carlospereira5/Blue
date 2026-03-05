@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"blue/internal/loyverse"
+	"aria/internal/loyverse"
 )
 
 func (s *SQLStore) UpsertShifts(ctx context.Context, shifts []loyverse.Shift) error {

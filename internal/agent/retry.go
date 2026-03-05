@@ -65,7 +65,7 @@ func (s *retrySession) withRetry(ctx context.Context, opName string, op func() (
 		}
 
 		if s.debug {
-			log.Printf("[DEBUG agent] ⚠ %s fallo transitorio (intento %d/%d): %v. Reintentando en %v...", opName, attempt, s.maxRetries, err, backoff)
+			log.Printf("[agent] retry %s (intento %d/%d, próximo en %v): %v", opName, attempt, s.maxRetries, backoff, err)
 		}
 
 		// Suspender goroutine liberando CPU (Zero-CPU idle)

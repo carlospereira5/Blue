@@ -8,8 +8,8 @@ import (
 	"log"
 	"time"
 
-	"blue/internal/db"
-	"blue/internal/loyverse"
+	"aria/internal/db"
+	"aria/internal/loyverse"
 )
 
 // maxInitialWindow is the maximum history to fetch on first sync (30 days to avoid 402 paywall).
@@ -53,10 +53,11 @@ type Service struct {
 	reader   Reader
 	interval time.Duration
 	logger   *log.Logger
+	debug    bool
 }
 
 // New creates a sync Service. intervalSec is how often to sync (in seconds).
-func New(store Store, reader Reader, intervalSec int, logger *log.Logger) *Service {
+func New(store Store, reader Reader, intervalSec int, logger *log.Logger, debug bool) *Service {
 	if logger == nil {
 		logger = log.Default()
 	}
@@ -68,6 +69,14 @@ func New(store Store, reader Reader, intervalSec int, logger *log.Logger) *Servi
 		reader:   reader,
 		interval: time.Duration(intervalSec) * time.Second,
 		logger:   logger,
+		debug:    debug,
+	}
+}
+
+// debugf logs only when debug mode is enabled.
+func (s *Service) debugf(format string, args ...any) {
+	if s.debug {
+		s.logger.Printf("[sync] "+format, args...)
 	}
 }
 
@@ -98,7 +107,7 @@ func (s *Service) RunOnce(ctx context.Context) error {
 
 func (s *Service) runOnce(ctx context.Context) error {
 	start := time.Now()
-	s.logger.Println("[sync] cycle start")
+	s.debugf("cycle start")
 
 	var firstErr error
 	record := func(entity string, err error) {
@@ -139,7 +148,7 @@ func (s *Service) syncStores(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.logger.Printf("[sync] stores: %d", len(resp.Stores))
+	s.debugf("stores: %d", len(resp.Stores))
 	return s.store.UpsertStores(ctx, resp.Stores)
 }
 
@@ -148,7 +157,7 @@ func (s *Service) syncEmployees(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.logger.Printf("[sync] employees: %d", len(emps))
+	s.debugf("employees: %d", len(emps))
 	return s.store.UpsertEmployees(ctx, emps)
 }
 
@@ -157,7 +166,7 @@ func (s *Service) syncPaymentTypes(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.logger.Printf("[sync] payment_types: %d", len(resp.PaymentTypes))
+	s.debugf("payment_types: %d", len(resp.PaymentTypes))
 	return s.store.UpsertPaymentTypes(ctx, resp.PaymentTypes)
 }
 
@@ -166,7 +175,7 @@ func (s *Service) syncSuppliers(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.logger.Printf("[sync] suppliers: %d", len(sups))
+	s.debugf("suppliers: %d", len(sups))
 	return s.store.UpsertSuppliers(ctx, sups)
 }
 
@@ -175,7 +184,7 @@ func (s *Service) syncCategories(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.logger.Printf("[sync] categories: %d", len(resp.Categories))
+	s.debugf("categories: %d", len(resp.Categories))
 	return s.store.UpsertCategories(ctx, resp.Categories)
 }
 
@@ -184,7 +193,7 @@ func (s *Service) syncItems(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.logger.Printf("[sync] items: %d", len(items))
+	s.debugf("items: %d", len(items))
 	return s.store.UpsertItems(ctx, items)
 }
 
@@ -193,7 +202,7 @@ func (s *Service) syncInventory(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.logger.Printf("[sync] inventory: %d", len(levels))
+	s.debugf("inventory: %d", len(levels))
 	return s.store.UpsertInventoryLevels(ctx, levels)
 }
 
@@ -217,21 +226,14 @@ func (s *Service) syncReceipts(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.logger.Printf("[sync] receipts: %d (since %s)", len(receipts), since.Format("2006-01-02"))
+	s.debugf("receipts: %d (since %s)", len(receipts), since.Format("2006-01-02"))
 
 	// Map receipt_number to ID (Loyverse free tier no devuelve campo "id" en receipts)
 	for i := range receipts {
 		receipts[i].ID = receipts[i].ReceiptNumber
 	}
 
-	// DEBUG: log first receipt to verify data from API
-	if len(receipts) > 0 {
-		s.logger.Printf("[sync] DEBUG first receipt from API: id=%q, receipt_number=%q, type=%q, total=%.2f",
-			receipts[0].ID, receipts[0].ReceiptNumber, receipts[0].ReceiptType, receipts[0].TotalMoney)
-	}
-
 	if err := s.store.UpsertReceipts(ctx, receipts); err != nil {
-		s.logger.Printf("[sync] ERROR UpsertReceipts: %v", err)
 		return err
 	}
 
@@ -257,16 +259,9 @@ func (s *Service) syncShifts(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.logger.Printf("[sync] shifts: %d (since %s)", len(shifts), since.Format("2006-01-02"))
-
-	// DEBUG: log first shift
-	if len(shifts) > 0 {
-		s.logger.Printf("[sync] DEBUG first shift: id=%q, opened_at=%v",
-			shifts[0].ID, shifts[0].OpenedAt)
-	}
+	s.debugf("shifts: %d (since %s)", len(shifts), since.Format("2006-01-02"))
 
 	if err := s.store.UpsertShifts(ctx, shifts); err != nil {
-		s.logger.Printf("[sync] ERROR UpsertShifts: %v", err)
 		return err
 	}
 

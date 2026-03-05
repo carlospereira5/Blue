@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"blue/internal/loyverse"
+	"aria/internal/loyverse"
 )
 
 func TestGetShifts_UsesCreatedAtParams(t *testing.T) {

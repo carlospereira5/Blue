@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"blue/internal/loyverse"
+	"aria/internal/loyverse"
 )
 
 func TestGetItems_Success(t *testing.T) {

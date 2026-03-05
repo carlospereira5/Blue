@@ -4,23 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"time"
 
-	"blue/internal/loyverse"
+	"aria/internal/loyverse"
 )
 
 func (s *SQLStore) UpsertReceipts(ctx context.Context, receipts []loyverse.Receipt) error {
 	if len(receipts) == 0 {
-		log.Printf("[DEBUG db] UpsertReceipts: 0 receipts, skipping")
 		return nil
-	}
-
-	log.Printf("[DEBUG db] UpsertReceipts: got %d receipts from sync", len(receipts))
-	// Debug: log first receipt ID to verify data
-	if len(receipts) > 0 {
-		log.Printf("[DEBUG db] UpsertReceipts: first receipt id=%q number=%q type=%q",
-			receipts[0].ID, receipts[0].ReceiptNumber, receipts[0].ReceiptType)
 	}
 
 	const batchSize = 100
@@ -30,12 +21,9 @@ func (s *SQLStore) UpsertReceipts(ctx context.Context, receipts []loyverse.Recei
 			end = len(receipts)
 		}
 		if err := s.upsertReceiptBatch(ctx, receipts[i:end]); err != nil {
-			log.Printf("[DEBUG db] UpsertReceipts: batch %d-%d ERROR: %v", i, end, err)
 			return err
 		}
-		log.Printf("[DEBUG db] UpsertReceipts: batch %d-%d inserted", i, end)
 	}
-	log.Printf("[DEBUG db] UpsertReceipts: completed %d receipts", len(receipts))
 	return nil
 }
 
@@ -189,9 +177,6 @@ func (s *SQLStore) upsertReceiptBatch(ctx context.Context, receipts []loyverse.R
 }
 
 func (s *SQLStore) GetReceiptsByDateRange(ctx context.Context, since, until time.Time) ([]loyverse.Receipt, error) {
-	// DEBUG: Log to confirm we're hitting the DB
-	log.Printf("[DEBUG db] 🔍 DB HIT: GetReceiptsByDateRange(since=%s, until=%s)", since.Format("2006-01-02"), until.Format("2006-01-02"))
-
 	q := fmt.Sprintf(`SELECT id, receipt_number, receipt_type, refund_for, order_id, note,
 		source, dining_option, customer_id, employee_id, store_id, pos_device_id,
 		total_money, total_tax, total_discount, tip, surcharge,
@@ -226,8 +211,6 @@ func (s *SQLStore) GetReceiptsByDateRange(ctx context.Context, since, until time
 			return nil, err
 		}
 	}
-
-	log.Printf("[DEBUG db] ✅ DB HIT: GetReceiptsByDateRange returned %d receipts", len(receipts))
 
 	if receipts == nil {
 		receipts = []loyverse.Receipt{}

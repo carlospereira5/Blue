@@ -6,7 +6,7 @@ import (
 	"context"
 	"time"
 
-	"blue/internal/loyverse"
+	"aria/internal/loyverse"
 )
 
 // Store defines the data access interface for Blue.

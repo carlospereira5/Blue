@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"blue/internal/db"
-	"blue/internal/loyverse"
+	"aria/internal/db"
+	"aria/internal/loyverse"
 )
 
 func newTestStore(t *testing.T) db.Store {

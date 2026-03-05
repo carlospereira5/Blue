@@ -1,13 +1,12 @@
-# Blue — Project Checkpoint V2
+# Aria — Project Checkpoint V2
 
-## Estado Actual de la Arquitectura (v2 — Blue System)
+## Estado Actual de la Arquitectura (v3 — Aria)
 
 ### Naming
 
 | Nombre | Rol | Paquete |
 |--------|-----|---------|
-| **Blue** | El sistema completo (Go module, repo, proyecto) | `blue` (module root) |
-| **Aria** | El agente — la cara. Maneja todo el I/O: WhatsApp, LLMs, Loyverse, CLI. | `internal/agent/`, `internal/whatsapp/` |
+| **Aria** | El producto Y el agente. Módulo Go, orquesta todos los workflows. | `module aria`, `internal/agent/`, `internal/whatsapp/` |
 | **Cortex** | El cerebro — motor de lógica de negocio. Funciones puras, sin I/O, sin side effects. | `internal/cortex/` |
 
 ### Visión General
@@ -24,14 +23,28 @@ La base de datos local es la **fuente de verdad** — un sync service periódico
 
 Cortex funciona como una **colección de funciones puras independientes** (analogía: Lambda functions). Cada función es testeable, componible, y se puede agregar sin tocar el resto del sistema.
 
-### Decisiones Arquitectónicas (Definitivas)
+### Decisiones Arquitectónicas (Definitivas — v3)
 
-1. **Mismo binario, paquetes separados**: Aria y Cortex NO son microservicios. Son paquetes `internal/` dentro del mismo proceso Go. Zero overhead de red.
-2. **DB como source of truth (sync periódico)**: El sync service corre en background. Las queries siempre van contra la DB local. Dato puede estar hasta N minutos stale (aceptable para kiosco).
-3. **Dual DB support**: SQLite (no CGO) para Termux/Android. PostgreSQL para servidor dedicado. El paquete `db` expone una interfaz.
-4. **No CGO (non-negotiable)**: `CGO_ENABLED=0` para cross-compilation a Android/Termux.
-5. **NLU Layer**: Groq (`llama-3.3-70b-versatile`) como primario, Gemini como fallback.
-6. **Proveedores**: `suppliers.json` con 17 proveedores reales del kiosco.
+1. **Aria ES el producto** (no "Blue"). El módulo Go se llama `aria`. `module aria`, imports `aria/internal/...`.
+2. **Aria es un AGENTE, no un chatbot**. No solo responde preguntas — ejecuta workflows multi-step. El LLM detecta intención, Aria orquesta las acciones (leer DB → computar con Cortex → escribir DB → responder).
+3. **Arquitectura de 2 capas** (reemplaza la arquitectura de 3 niveles anterior):
+   - **Capa I/O** (`loyverse/` + `db/` + `sync/`): movimiento puro de datos, CERO lógica de negocio.
+   - **Capa Cómputo** (`cortex/`): funciones puras, CERO I/O. Biblioteca funcional de matemática de negocio.
+   - **Aria** (`agent/`): orquestador por encima de ambas capas. No tiene lógica inline ni I/O propio — coordina.
+4. **DB como source of truth**: Aria nunca consulta Loyverse en tiempo real para queries de negocio. El sync service mantiene la DB actualizada. Dato puede estar hasta N minutos stale (aceptable).
+5. **Cortex es una biblioteca funcional**: cada función toma data y retorna resultados, sin estado, sin I/O. Análogo a funciones Lambda serverless. Se desarrollan y testean de forma totalmente independiente.
+6. **Single store** (no multi-store): este es un producto para un solo negocio. Sin over-engineering de escala.
+7. **Mismo binario, paquetes separados**: NO son microservicios. Son paquetes `internal/` en el mismo proceso Go.
+8. **Dual DB support**: SQLite (no CGO) para Termux/Android. PostgreSQL para VPS.
+9. **No CGO (non-negotiable)**: `CGO_ENABLED=0` para cross-compilation a Android/Termux.
+10. **NLU Layer**: Groq (`llama-3.3-70b-versatile`) como primario, Gemini como fallback.
+
+### Orden de desarrollo (acordado en sesión 2026-03-05)
+
+1. ✅ **Separar I/O de lógica en todo el programa**: eliminar fallbacks, mover lógica inline de handlers a Cortex, mover `loyverse/sort.go` a Cortex.
+2. ⬜ **Construir funciones base de Cortex**: `CalculateTopProducts`, `CalculateShiftExpenses`, `CalculateSupplierPayments`, `CalculateStock`.
+3. ⬜ **Redefinir tools a partir de lo que Cortex puede computar** (no al revés): las tools son wrappers de funciones Cortex, no lógica ad-hoc.
+4. ⬜ **Expandir el repertorio de tools**: empezar por tareas 100% Loyverse, luego tareas administrativas propias (con tablas propias de Blue en la DB).
 
 ### Estructura de Paquetes (Target)
 

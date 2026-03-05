@@ -1,4 +1,4 @@
-module blue
+module aria
 
 go 1.25.0
 

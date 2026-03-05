@@ -10,8 +10,8 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"blue/internal/db"
-	"blue/internal/loyverse"
+	"aria/internal/db"
+	"aria/internal/loyverse"
 )
 
 const defaultTestPGDSN = "postgres://blue:blue_password@localhost:5432/blue_db"

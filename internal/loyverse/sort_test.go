@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"blue/internal/loyverse"
+	"aria/internal/loyverse"
 )
 
 func TestSortItems_ByNameAsc(t *testing.T) {

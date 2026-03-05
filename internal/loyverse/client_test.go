@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"blue/internal/loyverse"
+	"aria/internal/loyverse"
 )
 
 // newTestClient crea un cliente apuntando a un servidor de test.

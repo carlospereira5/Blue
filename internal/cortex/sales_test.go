@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"blue/internal/cortex"
-	"blue/internal/loyverse"
+	"aria/internal/cortex"
+	"aria/internal/loyverse"
 )
 
 func TestCalculateSalesMetrics(t *testing.T) {

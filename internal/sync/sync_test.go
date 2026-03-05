@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"blue/internal/db"
-	"blue/internal/loyverse"
-	bluSync "blue/internal/sync"
+	"aria/internal/db"
+	"aria/internal/loyverse"
+	bluSync "aria/internal/sync"
 )
 
 // mockReader implements sync.Reader with canned data.
@@ -133,7 +133,7 @@ func TestRunOnce_SyncsAllEntities(t *testing.T) {
 	store := newTestStore(t)
 	reader := newMockReader()
 	logger := log.New(os.Stderr, "", 0)
-	svc := bluSync.New(store, reader, 120, logger)
+	svc := bluSync.New(store, reader, 120, logger, false)
 	ctx := context.Background()
 
 	if err := svc.RunOnce(ctx); err != nil {
@@ -150,7 +150,7 @@ func TestRunOnce_SyncsAllEntities(t *testing.T) {
 	if len(receipts) != 1 {
 		t.Errorf("receipts = %d, want 1", len(receipts))
 	}
-	if receipts[0].ID != "r-1" {
+	if receipts[0].ID != "001" {
 		t.Errorf("receipt id = %q", receipts[0].ID)
 	}
 
@@ -224,7 +224,7 @@ func TestRunOnce_Idempotent(t *testing.T) {
 	store := newTestStore(t)
 	reader := newMockReader()
 	logger := log.New(os.Stderr, "", 0)
-	svc := bluSync.New(store, reader, 120, logger)
+	svc := bluSync.New(store, reader, 120, logger, false)
 	ctx := context.Background()
 
 	// Run twice
@@ -260,7 +260,7 @@ func TestRunOnce_EmptyData(t *testing.T) {
 		payTypes: &loyverse.PaymentTypesResponse{},
 	}
 	logger := log.New(os.Stderr, "", 0)
-	svc := bluSync.New(store, reader, 120, logger)
+	svc := bluSync.New(store, reader, 120, logger, false)
 	ctx := context.Background()
 
 	if err := svc.RunOnce(ctx); err != nil {
@@ -272,7 +272,7 @@ func TestRunOnce_IncrementalReceipts(t *testing.T) {
 	store := newTestStore(t)
 	reader := newMockReader()
 	logger := log.New(os.Stderr, "", 0)
-	svc := bluSync.New(store, reader, 120, logger)
+	svc := bluSync.New(store, reader, 120, logger, false)
 	ctx := context.Background()
 
 	// First sync
@@ -310,7 +310,7 @@ func TestStart_CancelsOnContext(t *testing.T) {
 	store := newTestStore(t)
 	reader := newMockReader()
 	logger := log.New(os.Stderr, "", 0)
-	svc := bluSync.New(store, reader, 1, logger) // 1 second interval
+	svc := bluSync.New(store, reader, 1, logger, false) // 1 second interval
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()

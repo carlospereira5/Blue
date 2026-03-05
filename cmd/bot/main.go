@@ -10,12 +10,12 @@ import (
 	"os/signal"
 	"strings"
 
-	"blue/internal/agent"
-	"blue/internal/config"
-	"blue/internal/db"
-	"blue/internal/loyverse"
-	"blue/internal/sync"
-	"blue/internal/whatsapp"
+	"aria/internal/agent"
+	"aria/internal/config"
+	"aria/internal/db"
+	"aria/internal/loyverse"
+	"aria/internal/sync"
+	"aria/internal/whatsapp"
 
 	"github.com/sashabaranov/go-openai"
 	"google.golang.org/genai"
@@ -50,7 +50,7 @@ func main() {
 	loyClient := loyverse.NewClient(http.DefaultClient, cfg.LoyverseAPIKey)
 
 	// Iniciar sync service en background
-	syncService := sync.New(store, loyClient, cfg.SyncInterval, nil)
+	syncService := sync.New(store, loyClient, cfg.SyncInterval, nil, cfg.Debug)
 	go syncService.Start(ctx)
 
 	var llm agent.LLM

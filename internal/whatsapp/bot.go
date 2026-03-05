@@ -14,7 +14,7 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
 
-	"blue/internal/agent"
+	"aria/internal/agent"
 )
 
 // Bot es el wrapper de whatsmeow que conecta WhatsApp con el Agent de Lumi.

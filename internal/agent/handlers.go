@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"blue/internal/cortex"
-	"blue/internal/loyverse"
+	"aria/internal/cortex"
+	"aria/internal/loyverse"
 )
 
 // santiagoLoc es la timezone de Chile para parsear fechas del usuario.

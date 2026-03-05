@@ -3,7 +3,7 @@
 package cortex
 
 import (
-	"blue/internal/loyverse"
+	"aria/internal/loyverse"
 )
 
 // SalesMetrics contiene los totales calculados de ventas para un período.

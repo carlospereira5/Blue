@@ -2,27 +2,28 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Blue — The System
+## Aria — The System
 
-Blue is a business intelligence and automation system for a kiosk (~500 sales/day). It complements Loyverse POS by adding what Loyverse doesn't have: margins, inventory costs (FIFO), cash flow, debt tracking, predictive metrics, and proactive automation.
+Aria is a business intelligence and automation agent for a kiosk (~500 sales/day). It complements Loyverse POS by adding what Loyverse doesn't have: margins, inventory costs (FIFO), cash flow, debt tracking, predictive metrics, and proactive automation.
 
-**Blue does NOT replace Loyverse.** Loyverse remains the source of truth for raw POS transactions. Blue mirrors that data, applies business logic, and produces intelligence.
+**Aria does NOT replace Loyverse.** Loyverse remains the source of truth for raw POS transactions. Aria mirrors that data, applies business logic, and produces intelligence.
+
+This is NOT a commercial product — it serves a single store. No multi-store support. No over-engineering for hypothetical scale.
 
 ### Naming Convention
 
 | Name | Role | Package |
 |------|------|---------|
-| **Blue** | The system as a whole (Go module, repo, project name) | `blue` (module root) |
-| **Aria** | The agent — the face. Handles all I/O: WhatsApp, LLMs, Loyverse, CLI. What the team interacts with. | `internal/agent/`, `internal/whatsapp/` |
-| **Cortex** | The brain — business logic engine. Pure functions, no I/O, no side effects. Deterministic and testable. | `internal/cortex/` |
+| **Aria** | The product AND the agent. Orchestrates all workflows: WhatsApp, LLMs, Loyverse, CLI. What the team interacts with. | `module aria`, `internal/agent/`, `internal/whatsapp/` |
+| **Cortex** | The computation library. Pure functions, no I/O, no side effects. Deterministic and testable. Aria calls Cortex to compute. | `internal/cortex/` |
 
-For the kiosk team, they only see **Aria** (or whatever name we present in WhatsApp). They don't know Cortex exists. For us as developers, the separation is: Aria orchestrates I/O, Cortex computes.
+For the kiosk team, they only see **Aria**. They don't know Cortex exists. For us as developers: Aria orchestrates I/O and workflows, Cortex computes.
 
 ### The Analogy
 
-**Aria is Jarvis's voice. Cortex is Jarvis's brain.**
+**Aria is Tony Stark's Jarvis — both the voice AND the orchestration engine. Cortex is the mathematical brain behind it.**
 
-Aria receives a question via WhatsApp, understands the intent via LLM, calls the appropriate Cortex function to get computed results, and presents the answer back. Like Tony Stark talking to Jarvis — the voice interface is seamless, but the intelligence lives in the system behind it.
+Aria is an AGENT, not a chatbot. It doesn't just answer questions — it executes multi-step workflows. When someone says "add this expense and adjust the budget", Aria: understands the intent (LLM), saves the expense (db), retrieves the current budget (db), recalculates it (Cortex), saves the update (db), and confirms. All automatically.
 
 ### The Axiomatic Principle
 
@@ -54,7 +55,7 @@ Aria helps the team with daily operational tasks via WhatsApp:
 
 ### Domain 3: Proactive Intelligence (Cortex-powered automation)
 
-Blue doesn't just respond — it **acts**. Cortex runs scheduled analysis and triggers actions:
+Aria doesn't just respond — it **acts**. Cortex runs scheduled analysis and triggers actions:
 
 - **Demand forecasting**: Generate purchase orders for suppliers based on sales velocity
 - **Dead stock alerts**: Products in stock with zero or declining sales
@@ -71,7 +72,7 @@ Cortex is designed as a **collection of independent, pure functions** — simila
 - Is independently testable with `go test`
 - Can be composed with other functions to build complex workflows
 
-This makes Blue infinitely extensible: new features are just new functions added to Cortex, deployed modularly without touching the rest of the system.
+This makes Aria infinitely extensible: new capabilities are just new Cortex functions + a new tool in agent/ that calls them.
 
 ## Architecture
 
@@ -108,28 +109,28 @@ suppliers.json        → Supplier name → aliases mapping
 ### Data Flow
 
 ```
-User (WhatsApp / CLI / Admin TUI)
+User (WhatsApp / CLI)
     |
-Aria Agent (LLM) — understands intent, extracts params
+Aria (LLM) — understands intent, selects tool
     |
-Macro-Tool (Aria) — lightweight orchestrator
-    |
-Cortex — pure function, reads from DB via interface
-    |
-DB package — executes query (Postgres or SQLite)
-    |
-Cortex — computes result (aggregations, math, analysis)
-    |
-LLM — formats response for WhatsApp
+Tool/Workflow (internal/agent/) — orchestrates the workflow
+    ↙              ↘
+db/ / loyverse/   cortex/
+(I/O: read/write) (compute: pure math)
+    ↘              ↙
+Aria — formats and responds
     |
 User
 ```
 
-### The 3-Level Composability Pattern
+A workflow may call multiple tools, read from DB multiple times, and invoke several Cortex functions before producing a final answer. That is expected and correct — Aria is an agent.
 
-- **Level 1 — Data Access (I/O):** `db` package for local queries, `loyverse` client for sync and admin writes.
-- **Level 2 — Core Aggregators (CPU):** Pure Go functions in `cortex/` that take data structs and return computed results. No I/O, no side effects. Examples: `CalculateSalesMetrics()`, `AggregateByPaymentMethod()`, `ForecastDemand()`.
-- **Level 3 — Macro-Tools (LLM Interface):** Thin orchestrators in `agent/` that the LLM calls. They read from DB via Cortex, never from Loyverse directly.
+### The 2-Layer Architecture
+
+- **Layer 1 — I/O (loyverse/ + db/ + sync/):** Pure data movement. No logic, no computation. `loyverse/` talks to the API, `db/` reads/writes local DB, `sync/` keeps DB fresh. Zero business logic here.
+- **Layer 2 — Computation (cortex/):** Pure functions. Take data in, return results out. No I/O, no state. Every function is independently testable. This is a functional programming library for business math.
+
+**Aria (`internal/agent/`) is the orchestrator** — it lives above both layers. It understands user intent (LLM), decides which workflow to execute, calls Layer 1 to read/write data, calls Layer 2 to compute, and formats the response. The tools exposed to the LLM are the entry points of these workflows.
 
 ### Core Concepts
 
@@ -196,7 +197,7 @@ A web dashboard for visual business administration:
 - Pending tasks and delegated work
 - Accounting overview (cash flow, balances)
 
-This is the final deliverable. Everything else (Cortex, DB, Sync, Aria) must be solid before the dashboard is built.
+This is the final deliverable. Everything else (Aria agent, Cortex, DB, Sync) must be solid before the dashboard is built.
 
 ## Environment
 
@@ -214,8 +215,8 @@ This is the final deliverable. Everything else (Cortex, DB, Sync, Aria) must be 
 ## Commands
 
 ```nu
-task blue           # Run all tests (PRIMARY command)
-task test           # Alias for task blue
+task aria           # Run all tests (PRIMARY command)
+task test           # Alias for task aria
 task test:short     # Tests without verbose output
 task dev            # infisical run -- go run ./cmd/bot/main.go  (requires Infisical)
 task dev:cli        # Same but forces ALLOWED_NUMBERS="" (CLI mode)
@@ -248,7 +249,7 @@ See `.env.example` for the list of variables to add to your Infisical project.
 
 ## Module Structure
 
-Module name: `blue`. Import paths: `blue/internal/loyverse`, `blue/internal/config`, `blue/internal/agent`, `blue/internal/whatsapp`, `blue/internal/cortex`, `blue/internal/db`, `blue/internal/sync`.
+Module name: `aria`. Import paths: `aria/internal/loyverse`, `aria/internal/config`, `aria/internal/agent`, `aria/internal/whatsapp`, `aria/internal/cortex`, `aria/internal/db`, `aria/internal/sync`.
 
 ## Loyverse API Client (`internal/loyverse/`)
 
@@ -384,7 +385,7 @@ Secrets live in Infisical. See `.env.example` for the full list:
 | Cortex: Demand forecasting | Cortex | not started |
 | Admin CLI (Bubble Tea) | Aria | not started |
 | Loyverse write endpoints | Shared | not started |
-| Web dashboard | Blue | not started (final phase) |
+| Web dashboard | Aria | not started (final phase) |
 
 ## Session Continuity
 
