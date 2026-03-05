@@ -54,6 +54,7 @@ func New(l agentllm.LLM, loy loyverse.Reader, suppliers map[string][]string, opt
 	}
 
 	reader := agenttools.NewFallbackReader(cfg.store, loy)
+	reader = agenttools.NewCachingReader(reader, 5*time.Minute)
 	executor := agenttools.NewExecutor(reader, suppliers, cfg.debug)
 
 	return &Agent{

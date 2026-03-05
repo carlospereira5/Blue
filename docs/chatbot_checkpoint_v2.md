@@ -1,5 +1,90 @@
 # Aria — Project Checkpoint V2
 
+## [2026-03-05] Sesión: Audit de capas + CachingReader para items/categories
+
+### Qué se hizo
+
+**1. Audit arquitectónico completo** — se revisó el flujo end-to-end de las 5 tools desde WhatsApp hasta la capa I/O. Se documentó cada capa con su responsabilidad, qué llamadas hace, y qué toca la red. El audit se exportó como diagrama visual en Excalidraw (https://excalidraw.com/#json=j6h7W25QEP6Z5R3CkiAfB,Oz9_HtoRDrxhsLb9tkg41A).
+
+**2. Discusiones arquitectónicas** — dos temas debatidos y resueltos:
+- *¿Por qué `GetItems/GetCategories/GetInventory` no tienen rango temporal?* → Correcto por diseño. Items y categories son datos de catálogo sin dimensión temporal. No son series de tiempo.
+- *¿`handleGetTopProducts` podría usar solo receipts sin llamar `GetItems/GetCategories`?* → Parcialmente. Para `sort_order="asc"` (dead stock) es imposible: se necesita el catálogo completo para incluir productos con 0 ventas. Para `sort_order="desc"` sin filtro de categoría sería posible, pero la optimización es marginal (datos pequeños, SQL local). Se decidió no cambiar los handlers.
+
+**3. CachingReader implementado** — decorator sobre `DataReader` que cachea `GetItems` y `GetCategories` con TTL de 5 minutos. `GetInventory` explícitamente NO cacheado (el trade-off de staleness no vale para stock). Double-checked locking con `sync.RWMutex` para seguridad concurrente. 7 tests nuevos (hit, expiración, pass-through, concurrencia, TTL independiente).
+
+### Archivos modificados/creados
+
+- `internal/agent/tools/cache.go` — **NUEVO**: `CachingReader` struct + `NewCachingReader()`. Decorator pattern idéntico a `retrySession`.
+- `internal/agent/tools/cache_test.go` — **NUEVO**: 7 tests (hit×2, TTL expiry×2, pass-through, concurrent, independent TTL).
+- `internal/agent/agent.go` — Una línea nueva: `reader = agenttools.NewCachingReader(reader, 5*time.Minute)` entre `NewFallbackReader` y `NewExecutor`.
+
+### Decisiones de diseño
+
+1. **Solo items y categories cacheados**: inventory no se cachea — stock cambia con cada venta y el trade-off (sync 2min + cache Nmin = dato potencialmente muy stale) no es aceptable.
+2. **TTL 5 minutos**: items y categories cambian rarísimo (operaciones admin). 5 min es seguro y elimina redundancia dentro de una sesión LLM (TTL sesión = 30 min).
+3. **Double-checked locking**: 50 goroutines concurrentes → inner llamado exactamente 1 vez. Verificado en test.
+4. **Transparente para handlers**: ningún handler ni Executor cambió. El cache vive en la capa del reader, invisible para el resto del sistema.
+
+### Stack de capas (referencia post-audit)
+
+```
+WhatsApp (handler.go)           → RED: WhatsApp CDN (audio) + WhatsApp Web (reply)
+  ↓
+Agent.Chat() + SessionManager   → RED: Groq API (send + sendToolResults)
+  ↓ retrySession (backoff 1→4s)
+Executor.Execute()
+  ↓
+5 Tool Handlers (handlers.go)
+  ↓ GetXxx()
+CachingReader [NEW]             → cache HIT: 0ms — sin red, sin SQL
+  ↓ cache MISS
+fallbackReader
+  ↓ db != nil
+SQLStore (PostgreSQL/SQLite)    → LOCAL: SQL sin red
+  ↓ (db == nil, legacy)
+loyverse.Client                 → RED: Loyverse API (HTTPS)
+  ↓ data en memoria
+Cortex (funciones puras)        → CPU puro, sin I/O
+  ↓ resultado compacto ≤1KB
+Agent → LLM → WhatsApp
+```
+
+### N+1 conocido (no resuelto, documentado)
+
+`GetReceiptsByDateRange` carga receipt headers y luego hace N×6 queries para children (line_items, payments, taxes, discounts, modifiers, line_item_children). Para 288 receipts → ~1728 queries SQL locales. Aceptable para un kiosco. Si el rango crece (consultas mensuales), evaluar batch loading con `WHERE receipt_id = ANY($1)`.
+
+### Estado al cierre
+
+| Módulo | Componente | Estado |
+|--------|------------|--------|
+| Loyverse API client | Compartido | ✅ Completo — 34 tests |
+| Config | Compartido | ✅ Completo |
+| LLM client (Groq/Gemini) | Aria | ✅ Completo |
+| Agent + tools | Aria | ✅ v3 + CachingReader |
+| Multi-turn memory | Aria | ✅ Completo |
+| Retry/Resilience | Aria | ✅ Completo |
+| Voice-to-text (Whisper) | Aria | ✅ Completo |
+| WhatsApp bot (pure Go) | Aria | ✅ Completo |
+| DB package (SQLite + PG) | Compartido | ✅ Completo — 18+18 tests |
+| Sync service | Compartido | ✅ Completo — 5 tests |
+| **Cortex: todas las funciones** | **Cortex** | ✅ **Completo** — 5 funciones puras |
+| **CachingReader** | **Tools** | ✅ **Completo** — 7 tests |
+| Admin CLI (Bubble Tea) | Aria | 🔴 No iniciado |
+| Loyverse write endpoints | Compartido | 🔴 No iniciado |
+| Web dashboard | Aria | 🔴 No iniciado (fase final) |
+
+### Próximos pasos
+
+| Prioridad | Tarea | Descripción |
+|-----------|-------|-------------|
+| 🟡 Media | Expandir repertorio de tools | Nuevas tools: velocidad de venta (`SalesVelocity`), flujo de caja, deudas |
+| 🟡 Media | Admin CLI (Bubble Tea) | `cmd/admin/` — bulk photo upload, estandarizar nombres, CRUD sin abrir Loyverse |
+| 🔵 Baja | Batch loading receipts | Reemplazar N+1 por `WHERE receipt_id = ANY($1)` si consultas mensuales son lentas |
+| 🔵 Baja | Loyverse write endpoints | Necesarios para Admin CLI |
+| 🔵 Baja | Web dashboard | Fase final |
+
+---
+
 ## [2026-03-05] Sesión: Cortex completo — 4 funciones puras + tests
 
 ### Qué se hizo
