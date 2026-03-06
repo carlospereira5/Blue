@@ -36,6 +36,13 @@ type Store interface {
 	SaveAlias(ctx context.Context, entityType, entityID, canonical, alias string) error
 	GetAlias(ctx context.Context, entityType, alias string) (AliasResult, bool, error)
 
+	// User profiles y memorias (personalización por usuario)
+	GetUserProfile(ctx context.Context, jid string) (UserProfile, bool, error)
+	UpsertUserProfile(ctx context.Context, p UserProfile) error
+	GetUserMemories(ctx context.Context, jid string) ([]UserMemory, error)
+	SaveUserMemory(ctx context.Context, jid, content string) error
+	DeleteUserMemory(ctx context.Context, id int64) error
+
 	// Sync metadata
 	GetSyncMeta(ctx context.Context, entity string) (SyncMeta, error)
 	SetSyncMeta(ctx context.Context, meta SyncMeta) error
@@ -57,4 +64,20 @@ type AliasResult struct {
 	EntityID  string
 	Canonical string
 	UsedCount int
+}
+
+// UserProfile contiene información conocida sobre un usuario de WhatsApp.
+type UserProfile struct {
+	JID   string // WhatsApp JID completo (ej: "5491112345678@s.whatsapp.net")
+	Name  string // "Mamá", "Nico", "" si no configurado
+	Role  string // "dueña", "empleado", "" si no configurado
+	Notes string // notas libres del admin, "" si vacío
+}
+
+// UserMemory es una memoria aprendida por Aria sobre un usuario.
+type UserMemory struct {
+	ID        int64
+	JID       string
+	Content   string
+	CreatedAt time.Time
 }

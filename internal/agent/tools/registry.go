@@ -21,6 +21,7 @@ func AriaTools() []llm.ToolDef {
 		searchEmployeeTool(),
 		// Actions (Nivel 4)
 		saveAliasTool(),
+		saveMemoryTool(),
 	}
 }
 
@@ -230,6 +231,32 @@ entity_type válidos: "product", "category", "employee".`,
 			{Name: "alias", Type: "string", Description: "El término que usó el usuario y que debe mapearse a esta entidad"},
 		},
 		Required: []string{"entity_type", "entity_id", "canonical_name", "alias"},
+	}
+}
+
+func saveMemoryTool() llm.ToolDef {
+	return llm.ToolDef{
+		Name: "save_memory",
+		Description: `Guarda una memoria sobre el usuario actual para personalizar futuras conversaciones.
+
+CUÁNDO USAR: cuando el usuario revela algo relevante sobre sus preferencias, hábitos o contexto que debería influir en futuras respuestas.
+Ejemplos:
+- El usuario pide que siempre muestres los datos en resumen sin detalle
+- El usuario confirma que "mamá" y "la dueña" son la misma persona
+- El usuario explica un flujo de trabajo recurrente ("los martes siempre pregunto por las ventas de la semana")
+- El usuario prefiere ver los montos en miles (ej: "150K" en lugar de "$150.000")
+
+CUÁNDO NO USAR:
+- Para aliases de productos, categorías o empleados → usar save_alias
+- Para datos transaccionales (ventas, gastos, stock) → usar las tools de negocio
+- Para información ya sabida de conversaciones anteriores (ya está en memorias)
+- Información efímera o de una sola vez que no aplica al futuro
+
+Guardá memorias concretas y accionables, en una oración. Evitá redundancias con memorias existentes.`,
+		Parameters: []llm.ParamDef{
+			{Name: "content", Type: "string", Description: "La memoria a guardar: una oración clara y accionable sobre el usuario"},
+		},
+		Required: []string{"content"},
 	}
 }
 

@@ -620,6 +620,152 @@ func TestSuppliers_Upsert(t *testing.T) {
 	}
 }
 
+func TestUserProfile_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	_, found, err := s.GetUserProfile(ctx, "5491112345678@s.whatsapp.net")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if found {
+		t.Error("want not found, got found")
+	}
+}
+
+func TestUserProfile_UpsertAndGet(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	jid := "5491112345678@s.whatsapp.net"
+	p := db.UserProfile{JID: jid, Name: "Mamá", Role: "dueña", Notes: "Prefiere resúmenes cortos"}
+
+	if err := s.UpsertUserProfile(ctx, p); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	got, found, err := s.GetUserProfile(ctx, jid)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !found {
+		t.Fatal("want found, got not found")
+	}
+	if got.Name != p.Name || got.Role != p.Role || got.Notes != p.Notes {
+		t.Errorf("got %+v, want %+v", got, p)
+	}
+}
+
+func TestUserProfile_Update(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	jid := "5491112345678@s.whatsapp.net"
+	if err := s.UpsertUserProfile(ctx, db.UserProfile{JID: jid, Name: "Mamá", Role: "dueña"}); err != nil {
+		t.Fatalf("upsert1: %v", err)
+	}
+	// Update with new role and notes
+	if err := s.UpsertUserProfile(ctx, db.UserProfile{JID: jid, Name: "Mamá", Role: "administradora", Notes: "Nueva nota"}); err != nil {
+		t.Fatalf("upsert2: %v", err)
+	}
+
+	got, found, err := s.GetUserProfile(ctx, jid)
+	if err != nil || !found {
+		t.Fatalf("get: found=%v err=%v", found, err)
+	}
+	if got.Role != "administradora" {
+		t.Errorf("role = %q, want administradora", got.Role)
+	}
+	if got.Notes != "Nueva nota" {
+		t.Errorf("notes = %q, want 'Nueva nota'", got.Notes)
+	}
+}
+
+func TestUserMemories_SaveAndGet(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	jid := "5491112345678@s.whatsapp.net"
+
+	// Empty before saving
+	mems, err := s.GetUserMemories(ctx, jid)
+	if err != nil {
+		t.Fatalf("get empty: %v", err)
+	}
+	if len(mems) != 0 {
+		t.Fatalf("len = %d, want 0", len(mems))
+	}
+
+	// Save two memories
+	if err := s.SaveUserMemory(ctx, jid, "Prefiere ver datos en resumen"); err != nil {
+		t.Fatalf("save1: %v", err)
+	}
+	if err := s.SaveUserMemory(ctx, jid, "Siempre pregunta por cigarrillos primero"); err != nil {
+		t.Fatalf("save2: %v", err)
+	}
+
+	mems, err = s.GetUserMemories(ctx, jid)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(mems) != 2 {
+		t.Fatalf("len = %d, want 2", len(mems))
+	}
+	// Retorna de más reciente a más antigua (ORDER BY id DESC)
+	if mems[0].Content != "Siempre pregunta por cigarrillos primero" {
+		t.Errorf("content[0] = %q", mems[0].Content)
+	}
+}
+
+func TestUserMemories_IsolatedByJID(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	jid1 := "111@s.whatsapp.net"
+	jid2 := "222@s.whatsapp.net"
+
+	if err := s.SaveUserMemory(ctx, jid1, "Memoria de usuario 1"); err != nil {
+		t.Fatalf("save jid1: %v", err)
+	}
+	if err := s.SaveUserMemory(ctx, jid2, "Memoria de usuario 2"); err != nil {
+		t.Fatalf("save jid2: %v", err)
+	}
+
+	mems1, _ := s.GetUserMemories(ctx, jid1)
+	mems2, _ := s.GetUserMemories(ctx, jid2)
+
+	if len(mems1) != 1 || mems1[0].Content != "Memoria de usuario 1" {
+		t.Errorf("jid1 memories = %v", mems1)
+	}
+	if len(mems2) != 1 || mems2[0].Content != "Memoria de usuario 2" {
+		t.Errorf("jid2 memories = %v", mems2)
+	}
+}
+
+func TestUserMemories_Delete(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	jid := "5491112345678@s.whatsapp.net"
+	if err := s.SaveUserMemory(ctx, jid, "Memoria a borrar"); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	mems, _ := s.GetUserMemories(ctx, jid)
+	if len(mems) != 1 {
+		t.Fatalf("len = %d, want 1", len(mems))
+	}
+
+	if err := s.DeleteUserMemory(ctx, mems[0].ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	mems2, _ := s.GetUserMemories(ctx, jid)
+	if len(mems2) != 0 {
+		t.Fatalf("after delete: len = %d, want 0", len(mems2))
+	}
+}
+
 func TestUpsertEmpty(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

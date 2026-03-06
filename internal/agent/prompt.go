@@ -1,30 +1,35 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
+
+	"aria/internal/db"
 )
 
-// buildSystemPrompt construye el system prompt completo de Aria.
-// Cada sección es una función independiente que escribe a un builder,
-// lo que permite agregar secciones dinámicas (perfil de usuario, memorias)
-// sin cambiar la estructura.
+// buildSystemPrompt construye el system prompt completo de Aria para un usuario específico.
+// Carga el perfil y las memorias del usuario desde la DB (si store != nil) e inyecta
+// secciones personalizadas al inicio del prompt.
 //
-// Secciones actuales (estáticas):
-//   - Identidad: quién es Aria, qué hace, qué NO hace
-//   - Contexto del negocio: tipo, operación, estructura de ingresos
-//   - Reglas financieras: flujo de dinero, categorías de gastos, deudas
-//   - Selección de herramientas: cuándo usar cada tool, anti-cases
-//   - Formato: reglas WhatsApp-first, moneda, estructura de respuesta
-//   - Fecha: inyección dinámica de fecha/hora actual
+// Secciones estáticas: Identidad, Contexto del negocio, Reglas financieras,
+// Selección de herramientas, Formato, Fecha/hora actual.
 //
-// Secciones futuras (dinámicas, requieren db.Store):
-//   - Perfil del usuario: nombre, rol, instrucciones custom
-//   - Memorias: contexto aprendido en conversaciones anteriores
-func buildSystemPrompt() string {
+// Secciones dinámicas (cuando hay datos): Perfil del usuario, Memorias del usuario.
+func buildSystemPrompt(ctx context.Context, store db.Store, userID string) string {
 	var b strings.Builder
-	b.Grow(4096)
+	b.Grow(5120)
+
+	// Secciones dinámicas primero — el LLM las aplica al interpretar el resto del prompt.
+	if store != nil && userID != "" {
+		if profile, found, err := store.GetUserProfile(ctx, userID); err == nil && found {
+			writeUserProfile(&b, profile)
+		}
+		if memories, err := store.GetUserMemories(ctx, userID); err == nil && len(memories) > 0 {
+			writeUserMemories(&b, memories)
+		}
+	}
 
 	writeIdentity(&b)
 	writeBusinessContext(&b)
@@ -37,6 +42,28 @@ func buildSystemPrompt() string {
 }
 
 // ── Secciones del prompt ─────────────────────────────────────────────────────
+
+func writeUserProfile(b *strings.Builder, p db.UserProfile) {
+	b.WriteString("## USUARIO ACTUAL\n\n")
+	if p.Name != "" {
+		fmt.Fprintf(b, "Nombre: %s\n", p.Name)
+	}
+	if p.Role != "" {
+		fmt.Fprintf(b, "Rol: %s\n", p.Role)
+	}
+	if p.Notes != "" {
+		fmt.Fprintf(b, "Notas: %s\n", p.Notes)
+	}
+	b.WriteString("\nUsá esta información para personalizar el trato y adaptar el nivel de detalle de las respuestas.\n\n")
+}
+
+func writeUserMemories(b *strings.Builder, memories []db.UserMemory) {
+	b.WriteString("## MEMORIAS DE ESTE USUARIO\n\nContexto aprendido en conversaciones anteriores:\n\n")
+	for _, m := range memories {
+		fmt.Fprintf(b, "- %s\n", m.Content)
+	}
+	b.WriteString("\nTené en cuenta estas memorias al interpretar los pedidos del usuario.\n\n")
+}
 
 func writeIdentity(b *strings.Builder) {
 	b.WriteString(`## IDENTIDAD

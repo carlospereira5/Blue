@@ -285,6 +285,23 @@ CREATE TABLE IF NOT EXISTS aliases (
 	UNIQUE(entity_type, alias)
 );
 CREATE INDEX IF NOT EXISTS idx_aliases_lookup ON aliases(entity_type, alias);
+
+CREATE TABLE IF NOT EXISTS user_profiles (
+	jid        TEXT PRIMARY KEY,
+	name       TEXT,
+	role       TEXT,
+	notes      TEXT,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_memories (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	jid        TEXT NOT NULL,
+	content    TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_user_memories_jid ON user_memories(jid);
 `
 
 const postgresDDL = `
@@ -572,4 +589,21 @@ CREATE TABLE IF NOT EXISTS aliases (
 	UNIQUE(entity_type, alias)
 );
 CREATE INDEX IF NOT EXISTS idx_aliases_lookup ON aliases(entity_type, alias);
+
+CREATE TABLE IF NOT EXISTS user_profiles (
+	jid        TEXT PRIMARY KEY,
+	name       TEXT,
+	role       TEXT,
+	notes      TEXT,
+	created_at TIMESTAMPTZ NOT NULL,
+	updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_memories (
+	id         SERIAL PRIMARY KEY,
+	jid        TEXT NOT NULL,
+	content    TEXT NOT NULL,
+	created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_user_memories_jid ON user_memories(jid);
 `

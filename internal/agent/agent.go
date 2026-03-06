@@ -21,6 +21,7 @@ import (
 type Agent struct {
 	llm            agentllm.LLM
 	executor       *agenttools.Executor
+	store          db.Store // nil-safe: para cargar perfil/memorias del usuario
 	debug          bool
 	sessionManager *agentllm.SessionManager
 }
@@ -60,6 +61,7 @@ func New(l agentllm.LLM, loy loyverse.Reader, suppliers map[string][]string, opt
 	return &Agent{
 		llm:            l,
 		executor:       executor,
+		store:          cfg.store,
 		debug:          cfg.debug,
 		sessionManager: agentllm.NewSessionManager(30*time.Minute, cfg.debug),
 	}
@@ -86,7 +88,10 @@ func (a *Agent) ExecuteTool(ctx context.Context, name string, args map[string]an
 func (a *Agent) Chat(ctx context.Context, userID, message string) (string, error) {
 	a.debugLog(">>> mensaje usuario (%s): %q", userID, message)
 
-	session, err := a.sessionManager.GetOrCreate(ctx, userID, a.llm, buildSystemPrompt(), agenttools.AriaTools())
+	// Inyectamos el userID en el context para que las tools (ej: save_memory) puedan accederlo.
+	ctx = agenttools.ContextWithUserID(ctx, userID)
+
+	session, err := a.sessionManager.GetOrCreate(ctx, userID, a.llm, buildSystemPrompt(ctx, a.store, userID), agenttools.AriaTools())
 	if err != nil {
 		return "", fmt.Errorf("obteniendo sesión: %w", err)
 	}

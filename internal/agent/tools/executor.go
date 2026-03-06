@@ -8,6 +8,23 @@ import (
 	"aria/internal/db"
 )
 
+// ── Context helpers ───────────────────────────────────────────────────────────
+
+type contextKey string
+
+const userIDKey contextKey = "userID"
+
+// ContextWithUserID inyecta el userID en el context para que las tools puedan accederlo.
+// Llamado desde agent.Chat() antes de despachar tool calls.
+func ContextWithUserID(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, userIDKey, userID)
+}
+
+func userIDFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(userIDKey).(string)
+	return v
+}
+
 // santiagoLoc es la timezone de Chile para parsear fechas del usuario.
 var santiagoLoc *time.Location
 
@@ -58,6 +75,8 @@ func (e *Executor) Execute(ctx context.Context, name string, args map[string]any
 		return e.handleSearchEmployee(ctx, args)
 	case "save_alias":
 		return e.handleSaveAlias(ctx, args)
+	case "save_memory":
+		return e.handleSaveMemory(ctx, args)
 	default:
 		return map[string]any{"error": fmt.Sprintf("tool desconocido: %s", name)}, nil
 	}

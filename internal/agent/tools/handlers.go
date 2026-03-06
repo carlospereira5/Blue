@@ -399,6 +399,28 @@ func (e *Executor) handleSearchEmployee(ctx context.Context, args map[string]any
 	return map[string]any{"resultados": out, "total": len(out)}, nil
 }
 
+// ── save_memory ───────────────────────────────────────────────────────────────
+
+// handleSaveMemory persiste una memoria sobre el usuario actual.
+// El userID se obtiene del context (inyectado por agent.Chat).
+func (e *Executor) handleSaveMemory(ctx context.Context, args map[string]any) (map[string]any, error) {
+	content := stringArg(args, "content")
+	if content == "" {
+		return nil, fmt.Errorf("content es requerido")
+	}
+	if e.store == nil {
+		return map[string]any{"ok": false, "motivo": "storage no disponible"}, nil
+	}
+	userID := userIDFromContext(ctx)
+	if userID == "" {
+		return map[string]any{"ok": false, "motivo": "userID no disponible en contexto"}, nil
+	}
+	if err := e.store.SaveUserMemory(ctx, userID, content); err != nil {
+		return nil, fmt.Errorf("save memory: %w", err)
+	}
+	return map[string]any{"ok": true}, nil
+}
+
 // ── save_alias ────────────────────────────────────────────────────────────────
 
 // handleSaveAlias guarda un alias explícito después de que el usuario confirmó
