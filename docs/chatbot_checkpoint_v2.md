@@ -1,5 +1,81 @@
 # Aria — Project Checkpoint V2
 
+## [2026-03-06] Sesión: sistema de aliases auto-aprendido + system prompt rediseñado
+
+### Qué se hizo
+
+**1. Sistema de aliases (estilo zoxide — zero-trust)**
+- `cortex/search.go`: función pura `searchByName` + wrappers `SearchItems`, `SearchCategories`, `SearchEmployees`. Scoring three-tier: exact=1.0, prefix=0.9, contains=0.7. Ordenado por score desc, nombre asc.
+- `db/aliases.go`: `SaveAlias` (UPSERT con incremento de `used_count`) + `GetAlias` (lookup O(1) por índice). Tabla con `UNIQUE(entity_type, alias)` — no se puede reasignar un alias a otra entidad diferente.
+- `db/migrate.go`: tabla `aliases` agregada en ambos dialects (SQLite + Postgres).
+- `db/store.go`: tipo `AliasResult` + métodos `SaveAlias`, `GetAlias`, `GetAllEmployees` a la interface `Store`.
+- `db/reference.go`: `GetAllEmployees` para leer empleados de la DB local.
+- `loyverse/client.go`: `GetAllEmployees` agregado a la interface `Reader`.
+- `tools/reader.go`: `GetEmployees` a `DataReader` interface + implementación en `fallbackReader` (DB-first, Loyverse fallback).
+- `tools/cache.go`: cache de employees con double-checked locking (mismo patrón que items/categories).
+- `tools/executor.go`: campo `store db.Store` + `NewExecutor` actualizado + 4 nuevos cases + fix `intArg` para string (Groq mandaba `"10"` como string cuando el schema dice integer).
+- `tools/handlers.go`: 4 nuevos handlers — `search_product`, `search_category`, `search_employee`, `save_alias`. Patrón: DB alias lookup (tier 1, O(1)) → Cortex fuzzy (tier 2). Silent goroutine save cuando score ≥ 0.9 y alias ≠ canonical.
+- `tools/registry.go`: rediseño completo con formato CUÁNDO USAR/CUÁNDO NO USAR. 4 nuevas tools: search_product, search_category, search_employee, save_alias.
+
+**2. System prompt rediseñado (sesión paralela mergeada)**
+- `agent/prompt.go`: reescrito con 6 funciones independientes (`writeIdentity`, `writeBusinessContext`, `writeFinancialRules`, `writeToolStrategy`, `writeFormat`, `writeDateTime`). Listo para `writeUserProfile` y `writeUserMemories` (Paso 4).
+
+**3. Fix intArg — Groq string bug**
+`intArg` ahora maneja `case string: fmt.Sscanf(n, "%d", &i)` → elimina 400 errors cuando Groq pasa `"limit": "10"` en lugar de `"limit": 10`.
+
+### Archivos modificados/creados
+
+- `internal/cortex/search.go` — **NUEVO**: `SearchItems`, `SearchCategories`, `SearchEmployees`
+- `internal/cortex/search_test.go` — **NUEVO**: tests de scoring, sorting, case insensitivity
+- `internal/db/aliases.go` — **NUEVO**: `SaveAlias` + `GetAlias`
+- `internal/db/migrate.go` — tabla `aliases` en SQLite + Postgres DDL
+- `internal/db/store.go` — `AliasResult` + 3 métodos nuevos en interface
+- `internal/db/reference.go` — `GetAllEmployees`
+- `internal/loyverse/client.go` — `GetAllEmployees` en `Reader` interface
+- `internal/agent/tools/reader.go` — `GetEmployees` en `DataReader` + fallbackReader
+- `internal/agent/tools/cache.go` — cache employees (double-checked locking)
+- `internal/agent/tools/cache_test.go` — `GetEmployees` en `countMock`
+- `internal/agent/tools/executor.go` — store field + 4 nuevos cases + intArg string fix
+- `internal/agent/tools/handlers.go` — 4 nuevos handlers (search_*, save_alias)
+- `internal/agent/tools/registry.go` — 11 tools con formato CUÁNDO USAR/CUÁNDO NO USAR
+- `internal/agent/agent.go` — `NewExecutor` con store
+
+### Estado al cierre
+
+| Módulo | Componente | Estado |
+|--------|------------|--------|
+| Loyverse API client | Compartido | ✅ Completo — 34 tests |
+| Config | Compartido | ✅ Completo |
+| LLM client (Groq/Gemini) | Aria | ✅ Completo |
+| Agent + tools | Aria | ✅ v4 — 11 tools, alias system |
+| Multi-turn memory | Aria | ✅ Completo |
+| Retry/Resilience | Aria | ✅ Backoff 4s→8s |
+| Voice-to-text (Whisper) | Aria | ✅ Completo |
+| WhatsApp bot (pure Go) | Aria | ✅ Completo |
+| DB package (SQLite + PG) | Compartido | ✅ Completo — 18+18 tests |
+| Sync service | Compartido | ✅ Completo — 5 tests |
+| Cortex: funciones base (5) | Cortex | ✅ Completo |
+| Cortex: CalculateSalesVelocity | Cortex | ✅ Completo — 8 tests |
+| Cortex: CalculateCashFlow | Cortex | ✅ Completo — 7 tests |
+| **Cortex: Search (fuzzy)** | **Cortex** | ✅ **Completo** |
+| **Alias system (DB + tools)** | **Agent/DB** | ✅ **Completo** |
+| **System prompt (rediseñado)** | **Agent** | ✅ **Completo** — 6 secciones |
+| User profiles/memories (Paso 4) | Agent | 🔴 No iniciado |
+| Admin CLI (Bubble Tea) | Aria | 🔴 No iniciado |
+
+### Próximos pasos
+
+| Prioridad | Tarea | Descripción |
+|-----------|-------|-------------|
+| 🔴 Alta | User profiles + memories (Paso 4) | Tablas `user_profiles` + `user_memories` + `buildSystemPrompt(ctx, store, jid)` dinámico |
+| 🟡 Media | `get_hourly_breakdown` | Ventas por hora del día |
+| 🟡 Media | `get_category_breakdown` | Revenue por categoría en un período |
+| 🟡 Media | Tool `clarify` (graceful fallback) | Respuesta digna cuando el LLM no puede mapear el request |
+| 🔵 Baja | `get_employees` discovery tool | Listar empleados para el LLM |
+| 🔵 Baja | Loyverse write endpoints | Mutaciones vía API |
+
+---
+
 ## [2026-03-06] Sesión: get_cash_flow + diseño de arquitectura del agente
 
 ### Qué se hizo
