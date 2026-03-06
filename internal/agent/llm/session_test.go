@@ -45,8 +45,9 @@ func TestRetryDecorator_SuccessOnThirdAttempt(t *testing.T) {
 	if mock.attempts != 3 {
 		t.Fatalf("se esperaban 3 intentos, pero se registraron %d", mock.attempts)
 	}
-	// backoff: 1s (intento 1→2) + 2s (intento 2→3) = ~3s total
-	if elapsed < 3*time.Second {
+	// backoff: 4s (intento 1→2) + 8s (intento 2→3) = ~12s total
+	// Groq 429 puede pedir hasta ~7s de espera — backoff de 4s cubre el primer retry.
+	if elapsed < 4*time.Second {
 		t.Fatalf("el backoff no está pausando correctamente. Tiempo: %v", elapsed)
 	}
 	t.Logf("completado en %v con %d intentos", elapsed, mock.attempts)

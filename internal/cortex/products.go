@@ -47,7 +47,7 @@ func CalculateTopProducts(
 
 	qty := make(map[string]float64)
 	for _, r := range receipts {
-		if r.ReceiptType == "REFUND" {
+		if r.CancelledAt != nil || r.ReceiptType == "REFUND" {
 			continue
 		}
 		for _, li := range r.LineItems {

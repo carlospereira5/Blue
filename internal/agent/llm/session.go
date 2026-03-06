@@ -99,7 +99,7 @@ func (s *retrySession) withRetry(ctx context.Context, opName string, op func() (
 		calls []ToolCall
 		err   error
 	)
-	backoff := 1 * time.Second
+	backoff := 4 * time.Second
 
 	for attempt := 1; attempt <= s.maxRetries; attempt++ {
 		text, calls, err = op()

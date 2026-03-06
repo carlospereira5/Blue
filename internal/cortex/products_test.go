@@ -2,6 +2,7 @@ package cortex_test
 
 import (
 	"testing"
+	"time"
 
 	"aria/internal/cortex"
 	"aria/internal/loyverse"
@@ -134,5 +135,30 @@ func TestCalculateTopProducts(t *testing.T) {
 				t.Errorf("product %q has empty category", p.Name)
 			}
 		}
+	})
+
+	t.Run("cancelled receipts are excluded", func(t *testing.T) {
+		cancelled := receipts[0].LineItems[0] // any time value
+		_ = cancelled
+		now := func() *time.Time { t := time.Now(); return &t }
+		receiptsWithCancelled := []loyverse.Receipt{
+			{
+				ReceiptType: "SALE",
+				LineItems:   []loyverse.LineItem{{ItemID: "i1", Quantity: 50}},
+				CancelledAt: now(), // debe ignorarse
+			},
+			{
+				ReceiptType: "SALE",
+				LineItems:   []loyverse.LineItem{{ItemID: "i1", Quantity: 3}},
+			},
+		}
+		result := cortex.CalculateTopProducts(receiptsWithCancelled, items, cats, cortex.TopProductsOptions{Limit: 10})
+		for _, p := range result.Products {
+			if p.Name == "Coca Cola" {
+				assertFloat(t, "CocaCola qty (cancelled excluded)", 3, p.Quantity)
+				return
+			}
+		}
+		t.Error("Coca Cola not found")
 	})
 }
