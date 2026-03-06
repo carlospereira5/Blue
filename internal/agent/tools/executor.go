@@ -53,6 +53,10 @@ func NewExecutor(reader DataReader, store db.Store, suppliers map[string][]strin
 // Execute despacha una tool call al handler correspondiente.
 func (e *Executor) Execute(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
 	switch name {
+	case "get_categories":
+		return e.handleGetCategories(ctx, args)
+	case "get_items":
+		return e.handleGetItems(ctx, args)
 	case "get_sales":
 		return e.handleGetSales(ctx, args)
 	case "get_top_products":

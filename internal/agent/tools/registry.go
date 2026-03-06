@@ -7,6 +7,9 @@ import "aria/internal/agent/llm"
 // la selección correcta de herramientas por parte del LLM.
 func AriaTools() []llm.ToolDef {
 	return []llm.ToolDef{
+		// Discovery (Nivel 1)
+		getCategoriesToolDef(),
+		getItemsToolDef(),
 		// Analytics (Nivel 3)
 		salesTool(),
 		topProductsTool(),
@@ -22,6 +25,53 @@ func AriaTools() []llm.ToolDef {
 		// Actions (Nivel 4)
 		saveAliasTool(),
 		saveMemoryTool(),
+	}
+}
+
+func getCategoriesToolDef() llm.ToolDef {
+	return llm.ToolDef{
+		Name: "get_categories",
+		Description: `Lista las categorías de productos del catálogo. Usá esto para saber qué categorías existen antes de filtrar otras tools por categoría.
+
+CUÁNDO USAR:
+- Cuando el usuario pregunta qué categorías hay o quiere explorarlas.
+- Antes de usar el parámetro "category" en get_top_products, get_stock o get_sales_velocity, si no conocés el nombre exacto.
+- Para generar aliases de categorías o entender la estructura del catálogo.
+Ejemplos: "¿qué categorías tenés?", "listar categorías", "¿cuál es el nombre exacto de la categoría de cigarrillos?"
+
+CUÁNDO NO USAR:
+- Si ya sabés el nombre exacto de la categoría que necesitás.
+- Para buscar categorías por nombre coloquial con scoring → usar search_category.
+
+Retorna: lista de categorías con id y nombre, ordenadas alfabéticamente.`,
+		Parameters: []llm.ParamDef{
+			{Name: "name", Type: "string", Description: "Filtro opcional por nombre (substring, case-insensitive). Sin filtro devuelve todas."},
+		},
+	}
+}
+
+func getItemsToolDef() llm.ToolDef {
+	return llm.ToolDef{
+		Name: "get_items",
+		Description: `Lista productos del catálogo con sus precios. Permite explorar qué productos existen, filtrar por categoría o buscar por nombre.
+
+CUÁNDO USAR:
+- Cuando el usuario pregunta qué productos hay en una categoría.
+- Cuando pregunta el precio de un producto.
+- Para explorar el catálogo antes de generar aliases o hacer análisis.
+Ejemplos: "¿qué productos hay en Bebidas?", "¿cuánto cuesta la Coca-Cola?", "mostrarme los cigarrillos disponibles".
+
+CUÁNDO NO USAR:
+- Para saber cuánto se VENDIÓ de un producto → usar get_top_products.
+- Para desambiguar un nombre coloquial con scoring → usar search_product.
+- Para ver el stock disponible → usar get_stock.
+
+Retorna: lista de productos con id, nombre, categoría y precio. Excluye productos archivados.`,
+		Parameters: []llm.ParamDef{
+			{Name: "category", Type: "string", Description: "Filtro por nombre exacto de categoría (case-insensitive). Obtené el nombre exacto con get_categories si no lo sabés."},
+			{Name: "query", Type: "string", Description: "Filtro por nombre de producto (substring, case-insensitive)."},
+			{Name: "limit", Type: "integer", Description: "Máximo de productos a retornar (default: 20, máximo: 100)."},
+		},
 	}
 }
 

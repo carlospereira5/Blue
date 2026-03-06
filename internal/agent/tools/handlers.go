@@ -10,6 +10,85 @@ import (
 	"aria/internal/cortex"
 )
 
+// ── get_categories ────────────────────────────────────────────────────────────
+
+func (e *Executor) handleGetCategories(ctx context.Context, args map[string]any) (map[string]any, error) {
+	cats, err := e.reader.GetCategories(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get categories: %w", err)
+	}
+
+	nameFilter := strings.ToLower(strings.TrimSpace(stringArg(args, "name")))
+
+	out := make([]map[string]any, 0, len(cats))
+	for _, c := range cats {
+		if nameFilter != "" && !strings.Contains(strings.ToLower(c.Name), nameFilter) {
+			continue
+		}
+		out = append(out, map[string]any{"id": c.ID, "nombre": c.Name})
+	}
+
+	return map[string]any{"categorias": out, "total": len(out)}, nil
+}
+
+// ── get_items ─────────────────────────────────────────────────────────────────
+
+func (e *Executor) handleGetItems(ctx context.Context, args map[string]any) (map[string]any, error) {
+	items, err := e.reader.GetItems(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get items: %w", err)
+	}
+
+	cats, err := e.reader.GetCategories(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get categories: %w", err)
+	}
+
+	catByID := make(map[string]string, len(cats))
+	for _, c := range cats {
+		catByID[c.ID] = c.Name
+	}
+
+	categoryFilter := strings.ToLower(strings.TrimSpace(stringArg(args, "category")))
+	queryFilter := strings.ToLower(strings.TrimSpace(stringArg(args, "query")))
+	limit := intArg(args, "limit", 20)
+	if limit > 100 {
+		limit = 100
+	}
+
+	out := make([]map[string]any, 0, limit)
+	for _, item := range items {
+		if item.IsArchived {
+			continue
+		}
+
+		catName := catByID[item.CategoryID]
+
+		if categoryFilter != "" && !strings.EqualFold(catName, categoryFilter) {
+			continue
+		}
+		if queryFilter != "" && !strings.Contains(strings.ToLower(item.ItemName), queryFilter) {
+			continue
+		}
+
+		entry := map[string]any{
+			"id":        item.ID,
+			"nombre":    item.ItemName,
+			"categoria": catName,
+		}
+		if p := item.EffectivePrice(); p > 0 {
+			entry["precio"] = p
+		}
+
+		out = append(out, entry)
+		if len(out) >= limit {
+			break
+		}
+	}
+
+	return map[string]any{"productos": out, "total": len(out)}, nil
+}
+
 // ── get_sales ─────────────────────────────────────────────────────────────────
 
 func (e *Executor) handleGetSales(ctx context.Context, args map[string]any) (map[string]any, error) {
