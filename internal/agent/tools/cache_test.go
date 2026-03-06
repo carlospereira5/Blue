@@ -49,6 +49,10 @@ func (m *countMock) GetPaymentTypes(context.Context) ([]loyverse.PaymentType, er
 	return nil, nil
 }
 
+func (m *countMock) GetEmployees(context.Context) ([]loyverse.Employee, error) {
+	return nil, nil
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 func TestCachingReader_GetItems_HitsCache(t *testing.T) {

@@ -99,6 +99,31 @@ func (s *SQLStore) UpsertPaymentTypes(ctx context.Context, pts []loyverse.Paymen
 	return tx.Commit()
 }
 
+func (s *SQLStore) GetAllEmployees(ctx context.Context) ([]loyverse.Employee, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT id, name, is_owner FROM employees WHERE deleted_at IS NULL ORDER BY name",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("db: get all employees: %w", err)
+	}
+	defer rows.Close()
+
+	var result []loyverse.Employee
+	for rows.Next() {
+		var e loyverse.Employee
+		var isOwner int
+		if err := rows.Scan(&e.ID, &e.Name, &isOwner); err != nil {
+			return nil, fmt.Errorf("db: scan employee: %w", err)
+		}
+		e.IsOwner = isOwner == 1
+		result = append(result, e)
+	}
+	if result == nil {
+		result = []loyverse.Employee{}
+	}
+	return result, rows.Err()
+}
+
 func (s *SQLStore) GetPaymentTypes(ctx context.Context) ([]loyverse.PaymentType, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT id, name, type, created_at, updated_at, deleted_at FROM payment_types")
 	if err != nil {

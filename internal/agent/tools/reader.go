@@ -21,6 +21,7 @@ type DataReader interface {
 	GetCategories(ctx context.Context) ([]loyverse.Category, error)
 	GetInventory(ctx context.Context) ([]loyverse.InventoryLevel, error)
 	GetPaymentTypes(ctx context.Context) ([]loyverse.PaymentType, error)
+	GetEmployees(ctx context.Context) ([]loyverse.Employee, error)
 }
 
 // NewFallbackReader crea un DataReader que prefiere la DB local y usa Loyverse
@@ -82,4 +83,15 @@ func (r *fallbackReader) GetPaymentTypes(ctx context.Context) ([]loyverse.Paymen
 		return nil, err
 	}
 	return resp.PaymentTypes, nil
+}
+
+func (r *fallbackReader) GetEmployees(ctx context.Context) ([]loyverse.Employee, error) {
+	if r.db != nil {
+		return r.db.GetAllEmployees(ctx)
+	}
+	resp, err := r.loy.GetAllEmployees(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }

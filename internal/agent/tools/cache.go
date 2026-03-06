@@ -8,9 +8,9 @@ import (
 	"aria/internal/loyverse"
 )
 
-// CachingReader envuelve un DataReader y cachea GetItems y GetCategories con TTL.
-// GetReceipts, GetShifts, GetInventory y GetPaymentTypes siempre se delegan
-// al inner sin cachear — son datos volátiles o con rango temporal propio.
+// CachingReader envuelve un DataReader y cachea GetItems, GetCategories y GetEmployees
+// con TTL. El resto siempre se delega sin cachear — son datos volátiles o con rango
+// temporal propio.
 type CachingReader struct {
 	inner DataReader
 	ttl   time.Duration
@@ -21,6 +21,9 @@ type CachingReader struct {
 
 	cats    []loyverse.Category
 	catsExp time.Time
+
+	emps    []loyverse.Employee
+	empsExp time.Time
 }
 
 // NewCachingReader crea un CachingReader con el TTL especificado.
@@ -74,6 +77,30 @@ func (c *CachingReader) GetCategories(ctx context.Context) ([]loyverse.Category,
 	c.cats = cats
 	c.catsExp = time.Now().Add(c.ttl)
 	return cats, nil
+}
+
+func (c *CachingReader) GetEmployees(ctx context.Context) ([]loyverse.Employee, error) {
+	c.mu.RLock()
+	if time.Now().Before(c.empsExp) {
+		emps := c.emps
+		c.mu.RUnlock()
+		return emps, nil
+	}
+	c.mu.RUnlock()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if time.Now().Before(c.empsExp) { // double-check
+		return c.emps, nil
+	}
+
+	emps, err := c.inner.GetEmployees(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.emps = emps
+	c.empsExp = time.Now().Add(c.ttl)
+	return emps, nil
 }
 
 // ── Pass-through (sin cache) ──────────────────────────────────────────────────

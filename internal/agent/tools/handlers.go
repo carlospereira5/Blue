@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
+	"time"
 
 	"aria/internal/cortex"
 )
@@ -254,4 +256,169 @@ func (e *Executor) handleGetStock(ctx context.Context, args map[string]any) (map
 		out[i] = map[string]any{"producto": item.Name, "categoria": item.Category, "cantidad": item.Quantity}
 	}
 	return map[string]any{"stock": out, "total_productos": result.TotalItems}, nil
+}
+
+// ── search_product ────────────────────────────────────────────────────────────
+
+func (e *Executor) handleSearchProduct(ctx context.Context, args map[string]any) (map[string]any, error) {
+	query := stringArg(args, "query")
+	if query == "" {
+		return nil, fmt.Errorf("query es requerido")
+	}
+	queryNorm := strings.ToLower(strings.TrimSpace(query))
+
+	// Tier 1: DB alias lookup (match exacto por índice)
+	if e.store != nil {
+		if hit, found, err := e.store.GetAlias(ctx, "product", queryNorm); err == nil && found {
+			return map[string]any{
+				"resultados": []map[string]any{{
+					"id": hit.EntityID, "nombre": hit.Canonical, "confianza": 1.0,
+				}},
+				"total": 1,
+			}, nil
+		}
+	}
+
+	// Tier 2: fuzzy search via Cortex
+	items, err := e.reader.GetItems(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get items: %w", err)
+	}
+	matches := cortex.SearchItems(items, query, 5)
+
+	// Guardado silencioso: exactamente 1 match con score ≥ 0.9 y alias ≠ nombre canónico
+	if e.store != nil && len(matches) == 1 && matches[0].Score >= 0.9 {
+		top := matches[0]
+		if queryNorm != strings.ToLower(top.CanonicalName) {
+			go func() {
+				ctx2, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = e.store.SaveAlias(ctx2, "product", top.EntityID, top.CanonicalName, queryNorm)
+			}()
+		}
+	}
+
+	out := make([]map[string]any, len(matches))
+	for i, m := range matches {
+		out[i] = map[string]any{"id": m.EntityID, "nombre": m.CanonicalName, "confianza": m.Score}
+	}
+	return map[string]any{"resultados": out, "total": len(out)}, nil
+}
+
+// ── search_category ───────────────────────────────────────────────────────────
+
+func (e *Executor) handleSearchCategory(ctx context.Context, args map[string]any) (map[string]any, error) {
+	query := stringArg(args, "query")
+	if query == "" {
+		return nil, fmt.Errorf("query es requerido")
+	}
+	queryNorm := strings.ToLower(strings.TrimSpace(query))
+
+	// Tier 1: DB alias lookup
+	if e.store != nil {
+		if hit, found, err := e.store.GetAlias(ctx, "category", queryNorm); err == nil && found {
+			return map[string]any{
+				"resultados": []map[string]any{{
+					"id": hit.EntityID, "nombre": hit.Canonical, "confianza": 1.0,
+				}},
+				"total": 1,
+			}, nil
+		}
+	}
+
+	// Tier 2: fuzzy search via Cortex
+	cats, err := e.reader.GetCategories(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get categories: %w", err)
+	}
+	matches := cortex.SearchCategories(cats, query, 5)
+
+	// Guardado silencioso: exactamente 1 match con score ≥ 0.9 y alias ≠ nombre canónico
+	if e.store != nil && len(matches) == 1 && matches[0].Score >= 0.9 {
+		top := matches[0]
+		if queryNorm != strings.ToLower(top.CanonicalName) {
+			go func() {
+				ctx2, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = e.store.SaveAlias(ctx2, "category", top.EntityID, top.CanonicalName, queryNorm)
+			}()
+		}
+	}
+
+	out := make([]map[string]any, len(matches))
+	for i, m := range matches {
+		out[i] = map[string]any{"id": m.EntityID, "nombre": m.CanonicalName, "confianza": m.Score}
+	}
+	return map[string]any{"resultados": out, "total": len(out)}, nil
+}
+
+// ── search_employee ───────────────────────────────────────────────────────────
+
+func (e *Executor) handleSearchEmployee(ctx context.Context, args map[string]any) (map[string]any, error) {
+	query := stringArg(args, "query")
+	if query == "" {
+		return nil, fmt.Errorf("query es requerido")
+	}
+	queryNorm := strings.ToLower(strings.TrimSpace(query))
+
+	// Tier 1: DB alias lookup
+	if e.store != nil {
+		if hit, found, err := e.store.GetAlias(ctx, "employee", queryNorm); err == nil && found {
+			return map[string]any{
+				"resultados": []map[string]any{{
+					"id": hit.EntityID, "nombre": hit.Canonical, "confianza": 1.0,
+				}},
+				"total": 1,
+			}, nil
+		}
+	}
+
+	// Tier 2: fuzzy search via Cortex
+	emps, err := e.reader.GetEmployees(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get employees: %w", err)
+	}
+	matches := cortex.SearchEmployees(emps, query, 5)
+
+	// Guardado silencioso
+	if e.store != nil && len(matches) == 1 && matches[0].Score >= 0.9 {
+		top := matches[0]
+		if queryNorm != strings.ToLower(top.CanonicalName) {
+			go func() {
+				ctx2, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = e.store.SaveAlias(ctx2, "employee", top.EntityID, top.CanonicalName, queryNorm)
+			}()
+		}
+	}
+
+	out := make([]map[string]any, len(matches))
+	for i, m := range matches {
+		out[i] = map[string]any{"id": m.EntityID, "nombre": m.CanonicalName, "confianza": m.Score}
+	}
+	return map[string]any{"resultados": out, "total": len(out)}, nil
+}
+
+// ── save_alias ────────────────────────────────────────────────────────────────
+
+// handleSaveAlias guarda un alias explícito después de que el usuario confirmó
+// la desambiguación. Solo el LLM llama a esta tool — nunca en background.
+func (e *Executor) handleSaveAlias(ctx context.Context, args map[string]any) (map[string]any, error) {
+	entityType := stringArg(args, "entity_type")
+	entityID := stringArg(args, "entity_id")
+	canonical := stringArg(args, "canonical_name")
+	alias := stringArg(args, "alias")
+
+	if entityType == "" || entityID == "" || canonical == "" || alias == "" {
+		return nil, fmt.Errorf("entity_type, entity_id, canonical_name y alias son requeridos")
+	}
+	if e.store == nil {
+		return map[string]any{"ok": false, "motivo": "storage no disponible"}, nil
+	}
+
+	aliasNorm := strings.ToLower(strings.TrimSpace(alias))
+	if err := e.store.SaveAlias(ctx, entityType, entityID, canonical, aliasNorm); err != nil {
+		return nil, fmt.Errorf("save alias: %w", err)
+	}
+	return map[string]any{"ok": true}, nil
 }

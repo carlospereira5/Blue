@@ -33,6 +33,7 @@ type Reader interface {
 	GetShiftByID(ctx context.Context, id string) (*Shift, error)
 	GetAllShifts(ctx context.Context, since, until time.Time) ([]Shift, error)
 	GetEmployees(ctx context.Context, limit int, cursor string) (*EmployeesResponse, error)
+	GetAllEmployees(ctx context.Context) ([]Employee, error)
 	GetEmployeeByID(ctx context.Context, id string) (*Employee, error)
 	GetStores(ctx context.Context) (*StoresResponse, error)
 	GetStoreByID(ctx context.Context, id string) (*Store, error)

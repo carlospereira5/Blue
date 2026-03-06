@@ -7,6 +7,7 @@ import "aria/internal/agent/llm"
 // la selección correcta de herramientas por parte del LLM.
 func AriaTools() []llm.ToolDef {
 	return []llm.ToolDef{
+		// Analytics (Nivel 3)
 		salesTool(),
 		topProductsTool(),
 		shiftExpensesTool(),
@@ -14,6 +15,12 @@ func AriaTools() []llm.ToolDef {
 		stockTool(),
 		salesVelocityTool(),
 		cashFlowTool(),
+		// Search (Nivel 2)
+		searchProductTool(),
+		searchCategoryTool(),
+		searchEmployeeTool(),
+		// Actions (Nivel 4)
+		saveAliasTool(),
 	}
 }
 
@@ -152,6 +159,77 @@ Retorna: lista ordenada por urgencia (menor días_de_stock primero). Dead stock 
 			{Name: "limit", Type: "integer", Description: "Máximo de productos a retornar (default: 10)"},
 		},
 		Required: []string{"start_date", "end_date"},
+	}
+}
+
+func searchProductTool() llm.ToolDef {
+	return llm.ToolDef{
+		Name: "search_product",
+		Description: `Busca un producto por nombre usando fuzzy matching. Retorna los mejores candidatos con score de confianza.
+
+CUÁNDO USAR: cuando el usuario menciona un producto por nombre coloquial o abreviado y necesitás resolver el nombre canónico antes de llamar otra tool.
+Ejemplos: "palmal azul", "coca", "sprite grande".
+
+Retorna: lista de hasta 5 candidatos con id, nombre canónico y confianza (1.0=exacto, 0.9=prefijo, 0.7=contiene).
+- Si confianza ≥ 0.9 y hay un solo resultado: usarlo directamente.
+- Si hay múltiples candidatos o confianza < 0.9: presentar opciones al usuario para confirmar.
+- Después de confirmación del usuario: llamar save_alias con el resultado confirmado.`,
+		Parameters: []llm.ParamDef{
+			{Name: "query", Type: "string", Description: "Nombre o alias del producto a buscar"},
+		},
+		Required: []string{"query"},
+	}
+}
+
+func searchCategoryTool() llm.ToolDef {
+	return llm.ToolDef{
+		Name: "search_category",
+		Description: `Busca una categoría por nombre usando fuzzy matching. Útil para resolver aliases coloquiales antes de filtrar otras tools.
+
+CUÁNDO USAR: cuando el usuario menciona una categoría con nombre coloquial (ej: "cigarros", "bebidas", "golosinas") y necesitás el nombre exacto para pasarlo como parámetro category a otra tool.
+
+Retorna: candidatos con id, nombre canónico y confianza.
+- Si confianza ≥ 0.9 y un solo resultado: usar ese nombre en el parámetro category de la tool siguiente.
+- Si hay ambigüedad: preguntar al usuario.
+- Después de confirmación: llamar save_alias.`,
+		Parameters: []llm.ParamDef{
+			{Name: "query", Type: "string", Description: "Nombre o alias de la categoría a buscar"},
+		},
+		Required: []string{"query"},
+	}
+}
+
+func searchEmployeeTool() llm.ToolDef {
+	return llm.ToolDef{
+		Name: "search_employee",
+		Description: `Busca un empleado por nombre usando fuzzy matching.
+
+CUÁNDO USAR: cuando el usuario menciona a un empleado por apodo o nombre parcial.
+Ejemplos: "carlos", "mari", "el nuevo".
+
+Retorna: candidatos con id, nombre canónico y confianza.`,
+		Parameters: []llm.ParamDef{
+			{Name: "query", Type: "string", Description: "Nombre o alias del empleado a buscar"},
+		},
+		Required: []string{"query"},
+	}
+}
+
+func saveAliasTool() llm.ToolDef {
+	return llm.ToolDef{
+		Name: "save_alias",
+		Description: `Guarda un alias para una entidad después de que el usuario confirmó la desambiguación. Permite que futuras búsquedas de ese alias resuelvan directamente sin fuzzy search.
+
+CUÁNDO USAR: solo después de que el usuario confirmó explícitamente a qué entidad se refería (tras una desambiguación). NUNCA llamar sin confirmación del usuario.
+
+entity_type válidos: "product", "category", "employee".`,
+		Parameters: []llm.ParamDef{
+			{Name: "entity_type", Type: "string", Description: "Tipo de entidad: 'product', 'category' o 'employee'"},
+			{Name: "entity_id", Type: "string", Description: "ID de la entidad en Loyverse (obtenido del resultado de search_*)"},
+			{Name: "canonical_name", Type: "string", Description: "Nombre canónico de la entidad (tal como está en el sistema)"},
+			{Name: "alias", Type: "string", Description: "El término que usó el usuario y que debe mapearse a esta entidad"},
+		},
+		Required: []string{"entity_type", "entity_id", "canonical_name", "alias"},
 	}
 }
 

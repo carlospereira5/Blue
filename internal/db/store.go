@@ -29,7 +29,12 @@ type Store interface {
 	GetAllItems(ctx context.Context) ([]loyverse.Item, error)
 	GetAllCategories(ctx context.Context) ([]loyverse.Category, error)
 	GetAllInventoryLevels(ctx context.Context) ([]loyverse.InventoryLevel, error)
+	GetAllEmployees(ctx context.Context) ([]loyverse.Employee, error)
 	GetPaymentTypes(ctx context.Context) ([]loyverse.PaymentType, error)
+
+	// Aliases (aprendizaje automático de vocabulario)
+	SaveAlias(ctx context.Context, entityType, entityID, canonical, alias string) error
+	GetAlias(ctx context.Context, entityType, alias string) (AliasResult, bool, error)
 
 	// Sync metadata
 	GetSyncMeta(ctx context.Context, entity string) (SyncMeta, error)
@@ -45,4 +50,11 @@ type SyncMeta struct {
 	Entity     string
 	LastSyncAt time.Time
 	Cursor     string
+}
+
+// AliasResult es el resultado de una búsqueda de alias en la DB.
+type AliasResult struct {
+	EntityID  string
+	Canonical string
+	UsedCount int
 }

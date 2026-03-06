@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"aria/internal/db"
 )
 
 // santiagoLoc es la timezone de Chile para parsear fechas del usuario.
@@ -20,13 +22,15 @@ func init() {
 // Executor despacha las tool calls del LLM al handler correspondiente.
 type Executor struct {
 	reader    DataReader
+	store     db.Store // para operaciones de aliases — nil-safe
 	suppliers map[string][]string
 	debug     bool
 }
 
 // NewExecutor crea un Executor con el DataReader y suppliers provistos.
-func NewExecutor(reader DataReader, suppliers map[string][]string, debug bool) *Executor {
-	return &Executor{reader: reader, suppliers: suppliers, debug: debug}
+// store puede ser nil: en ese caso las operaciones de aliases se omiten.
+func NewExecutor(reader DataReader, store db.Store, suppliers map[string][]string, debug bool) *Executor {
+	return &Executor{reader: reader, store: store, suppliers: suppliers, debug: debug}
 }
 
 // Execute despacha una tool call al handler correspondiente.
@@ -46,6 +50,14 @@ func (e *Executor) Execute(ctx context.Context, name string, args map[string]any
 		return e.handleGetCashFlow(ctx, args)
 	case "get_stock":
 		return e.handleGetStock(ctx, args)
+	case "search_product":
+		return e.handleSearchProduct(ctx, args)
+	case "search_category":
+		return e.handleSearchCategory(ctx, args)
+	case "search_employee":
+		return e.handleSearchEmployee(ctx, args)
+	case "save_alias":
+		return e.handleSaveAlias(ctx, args)
 	default:
 		return map[string]any{"error": fmt.Sprintf("tool desconocido: %s", name)}, nil
 	}
@@ -92,6 +104,13 @@ func intArg(args map[string]any, key string, defaultVal int) int {
 		return int(n)
 	case int:
 		return n
+	case string:
+		// Groq a veces envía integers como strings — parseo defensivo
+		var i int
+		if _, err := fmt.Sscanf(n, "%d", &i); err == nil {
+			return i
+		}
+		return defaultVal
 	default:
 		return defaultVal
 	}

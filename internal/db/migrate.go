@@ -273,6 +273,18 @@ CREATE TABLE IF NOT EXISTS sync_meta (
 	last_sync_at TEXT NOT NULL,
 	cursor       TEXT
 );
+
+CREATE TABLE IF NOT EXISTS aliases (
+	id          INTEGER PRIMARY KEY AUTOINCREMENT,
+	entity_type TEXT    NOT NULL,
+	entity_id   TEXT    NOT NULL,
+	canonical   TEXT    NOT NULL,
+	alias       TEXT    NOT NULL,
+	used_count  INTEGER NOT NULL DEFAULT 1,
+	created_at  TEXT    NOT NULL,
+	UNIQUE(entity_type, alias)
+);
+CREATE INDEX IF NOT EXISTS idx_aliases_lookup ON aliases(entity_type, alias);
 `
 
 const postgresDDL = `
@@ -548,4 +560,16 @@ CREATE TABLE IF NOT EXISTS sync_meta (
 	last_sync_at TIMESTAMPTZ NOT NULL,
 	cursor       TEXT
 );
+
+CREATE TABLE IF NOT EXISTS aliases (
+	id          SERIAL PRIMARY KEY,
+	entity_type TEXT    NOT NULL,
+	entity_id   TEXT    NOT NULL,
+	canonical   TEXT    NOT NULL,
+	alias       TEXT    NOT NULL,
+	used_count  INTEGER NOT NULL DEFAULT 1,
+	created_at  TIMESTAMPTZ NOT NULL,
+	UNIQUE(entity_type, alias)
+);
+CREATE INDEX IF NOT EXISTS idx_aliases_lookup ON aliases(entity_type, alias);
 `
