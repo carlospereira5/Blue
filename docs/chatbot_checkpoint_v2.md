@@ -1,5 +1,261 @@
 # Aria — Project Checkpoint V2
 
+## [2026-03-06] Sesión: get_cash_flow + diseño de arquitectura del agente
+
+### Qué se hizo
+
+**1. Nueva tool — `get_cash_flow`**
+- `cortex/cashflow.go`: función pura `CalculateCashFlow`. Combina receipts (ventas netas = bruto - descuentos - reembolsos, cancelados excluidos) con `CashMovements` de shifts (PAY_OUT = egresos, PAY_IN = entradas extra). Calcula `NetCashFlow = NetSales + TotalPayIn - TotalPayOut`.
+- `cortex/cashflow_test.go`: 7 tests table-driven (ventas sin movimientos, reembolsos, payouts, payins, cancelados, empty, escenario completo).
+- Handler `handleGetCashFlow` + case en executor + `cashFlowTool()` en registry.
+- Output: `periodo_dias`, `ventas_netas`, `egresos_caja`, `entradas_caja`, `flujo_neto`.
+
+**2. Análisis de bugs en producción (log real)**
+- Bug: `get_sales_velocity` → Groq rechaza `"limit": "10"` (string en lugar de int). Raíz: el LLM pasa el param como string y Groq valida el schema antes de que `intArg` lo procese. Pendiente de fix.
+- Bug: `get_stock` retorna vacío → limitación conocida del free tier de Loyverse (inventory: 0). No es un bug del código.
+- Bug: `Failed to call a function` (400) en preguntas ambiguas → el LLM no tiene salida digna cuando no puede mapear el request a una tool con params válidos.
+
+**3. Diseño de arquitectura del agente (discusión)**
+Se identificaron tres sistemas a implementar en fases:
+
+- **Fase 1 (next)**: Fix `limit` type + tool `clarify` (graceful fallback) + inyectar categorías en system prompt
+- **Fase 2**: `entities.json` (aliases para categorías, productos, gastos/empleados) + fuzzy match en Cortex
+- **Fase 3**: Tool `learn_alias` + persistencia en DB (aliases dinámicos que crecen solos)
+- **Fase 4**: Memoria persistente por usuario (personalización real por WhatsApp JID)
+
+### Archivos modificados/creados
+
+- `internal/cortex/cashflow.go` — **NUEVO**: `CalculateCashFlow` + tipos `CashFlowResult`
+- `internal/cortex/cashflow_test.go` — **NUEVO**: 7 tests
+- `internal/agent/tools/handlers.go` — Nuevo handler `handleGetCashFlow`
+- `internal/agent/tools/executor.go` — Case `"get_cash_flow"` en el switch
+- `internal/agent/tools/registry.go` — `cashFlowTool()` + agregado a `AriaTools()`
+
+### Bloqueantes / decisiones pendientes
+
+- El `limit` como `Type: "integer"` en el schema causa rechazos de Groq cuando el LLM pasa string. Decidir si cambiar el type en el schema o agregar case string en `intArg` (o ambos).
+- El usuario tiene avanzado un `.md` de diseño del agente y archivos modificados de la sesión paralela. Integrar antes de implementar Fase 1.
+
+### Estado al cierre
+
+| Módulo | Componente | Estado |
+|--------|------------|--------|
+| Loyverse API client | Compartido | ✅ Completo — 34 tests |
+| Config | Compartido | ✅ Completo |
+| LLM client (Groq/Gemini) | Aria | ✅ Completo |
+| Agent + tools | Aria | ✅ v3 + CachingReader |
+| Multi-turn memory | Aria | ✅ Completo |
+| Retry/Resilience | Aria | ✅ Backoff 4s→8s |
+| Voice-to-text (Whisper) | Aria | ✅ Completo |
+| WhatsApp bot (pure Go) | Aria | ✅ Completo |
+| DB package (SQLite + PG) | Compartido | ✅ Completo — 18+18 tests |
+| Sync service | Compartido | ✅ Completo — 5 tests |
+| Cortex: 5 funciones base | Cortex | ✅ Completo |
+| Cortex: CalculateSalesVelocity | Cortex | ✅ Completo — 8 tests |
+| **Cortex: CalculateCashFlow** | **Cortex** | ✅ **Completo** — 7 tests |
+| **get_cash_flow tool** | **Tools** | ✅ **Completo** |
+| Diseño arquitectura del agente | Diseño | 🟡 En progreso — fases 1-4 definidas |
+| Fix `limit` type en schemas | Tools | 🔴 Pendiente |
+| Tool `clarify` (graceful fallback) | Agent | 🔴 Pendiente |
+| Inyectar categorías en system prompt | Agent | 🔴 Pendiente |
+| entities.json + fuzzy match | Agent/Cortex | 🔴 No iniciado |
+| Memoria por usuario | Agent | 🔴 No iniciado |
+| Admin CLI (Bubble Tea) | Aria | 🔴 No iniciado |
+
+### Próximos pasos
+
+| Prioridad | Tarea | Descripción |
+|-----------|-------|-------------|
+| 🔴 Alta | Integrar MD de diseño del agente | El usuario tiene avanzado el diseño en sesión paralela — integrar antes de codear |
+| 🔴 Alta | Fix `limit` type + `intArg` string case | Elimina 400 errors en Groq por tipo incorrecto |
+| 🔴 Alta | Tool `clarify` + system prompt | Graceful fallback cuando el LLM no puede mapear el request |
+| 🟡 Media | Inyectar categorías en system prompt | 14 categorías → LLM mapea "cigarros" → "Cigarrillos" solo |
+| 🟡 Media | `entities.json` + fuzzy match en Cortex | Aliases para categorías, productos y gastos/empleados |
+| 🟡 Media | `get_hourly_breakdown` | Ventas por hora del día |
+| 🟡 Media | `get_category_breakdown` | Revenue por categoría en un período |
+| 🔵 Baja | `learn_alias` tool + DB | Aliases dinámicos persistentes |
+| 🔵 Baja | Memoria por usuario | Personalización por WhatsApp JID |
+
+---
+
+## [2026-03-05] Sesión: get_sales_velocity + bugfixes + system prompt
+
+### Qué se hizo
+
+**1. Bug fix — `CalculateTopProducts` no filtraba receipts cancelados**
+`CalculateSalesMetrics` tenía `if r.CancelledAt != nil { continue }` pero `CalculateTopProducts` no.
+Los line_items de receipts cancelados se sumaban al ranking. Fix: una línea en `cortex/products.go`.
+Test nuevo agregado para cubrir el caso.
+
+**2. Nueva tool — `get_sales_velocity`**
+- `cortex/velocity.go`: función pura `CalculateSalesVelocity`. Calcula net qty (SALE - REFUND),
+  filtra cancelados, combina con inventory_levels para `days_of_stock`. Ordena por urgencia:
+  menor `days_of_stock` primero (0 = ya sin stock pero sigue vendiendo), dead stock al final.
+- `cortex/velocity_test.go`: 8 tests (velocity, sorting, refunds, cancelados, filtro, límite, edge cases).
+- Handler `handleGetSalesVelocity` + entrada en executor + definición en registry.
+- Output: `periodo_dias`, `productos[]` con `unidades_dia`, `stock_actual`, `dias_de_stock`.
+
+**3. Fixes post-producción (análisis de log real)**
+- **System prompt reescrito**: excepción explícita para preguntas meta ("¿qué tools tenés?" NO llama tools),
+  sección "QUÉ HERRAMIENTA USAR" con frases → tool mapping, template de respuesta para velocity,
+  nombre corregido de "Lumi" → "Aria".
+- **Retry backoff**: `1s → 4s` inicial (patrón: 4s → 8s). Groq 429 pide hasta ~7s de espera;
+  el backoff anterior (1s → 2s) fallaba garantizado los 3 intentos.
+- **`periodo_dias` float**: `math.Round()` en el handler → `5.0` en lugar de `4.9999999999999885`.
+- **Limit default `get_sales_velocity`**: 20 → 10 productos (evita reventar los 12K TPM de Groq free).
+
+### Archivos modificados/creados
+
+- `internal/cortex/products.go` — Bug fix: `|| r.CancelledAt != nil` en el guard de REFUND
+- `internal/cortex/products_test.go` — Test nuevo: "cancelled receipts are excluded"
+- `internal/cortex/velocity.go` — **NUEVO**: `CalculateSalesVelocity` + tipos `VelocityItem`, `SalesVelocityResult`, `SalesVelocityOptions`
+- `internal/cortex/velocity_test.go` — **NUEVO**: 8 tests
+- `internal/agent/tools/handlers.go` — Nuevo handler `handleGetSalesVelocity`
+- `internal/agent/tools/executor.go` — Case `"get_sales_velocity"` en el switch
+- `internal/agent/tools/registry.go` — `salesVelocityTool()` + agregado a `AriaTools()`
+- `internal/agent/prompt.go` — System prompt reescrito (meta-questions, tool mapping, templates)
+- `internal/agent/llm/session.go` — Backoff inicial: `1s → 4s`
+- `internal/agent/llm/session_test.go` — Aserción de timing actualizada: `3s → 4s`
+
+### Limitaciones conocidas (Loyverse free tier)
+
+- `inventory: 0` en sync — Loyverse free no devuelve stock vía API. `get_stock` y
+  `get_sales_velocity.stock_actual` siempre retornan 0. No es un bug, es una limitación del plan.
+- **12K TPM Groq free**: con sesiones multi-turno largas puede seguir pegando el límite.
+  Solución real: upgrade de plan o usar Gemini como LLM primario.
+
+### Estado al cierre
+
+| Módulo | Componente | Estado |
+|--------|------------|--------|
+| Loyverse API client | Compartido | ✅ Completo — 34 tests |
+| Config | Compartido | ✅ Completo |
+| LLM client (Groq/Gemini) | Aria | ✅ Completo |
+| Agent + tools | Aria | ✅ v3 + CachingReader |
+| Multi-turn memory | Aria | ✅ Completo |
+| Retry/Resilience | Aria | ✅ Backoff 4s→8s |
+| Voice-to-text (Whisper) | Aria | ✅ Completo |
+| WhatsApp bot (pure Go) | Aria | ✅ Completo |
+| DB package (SQLite + PG) | Compartido | ✅ Completo — 18+18 tests |
+| Sync service | Compartido | ✅ Completo — 5 tests |
+| Cortex: 5 funciones base | Cortex | ✅ Completo |
+| **Cortex: CalculateSalesVelocity** | **Cortex** | ✅ **Completo** — 8 tests |
+| **get_sales_velocity tool** | **Tools** | ✅ **Completo** |
+| **Bug: cancelled en TopProducts** | **Cortex** | ✅ **Resuelto** |
+| Admin CLI (Bubble Tea) | Aria | 🔴 No iniciado |
+| Loyverse write endpoints | Compartido | 🔴 No iniciado |
+| Web dashboard | Aria | 🔴 No iniciado (fase final) |
+
+### Próximos pasos
+
+| Prioridad | Tarea | Descripción |
+|-----------|-------|-------------|
+| 🟡 Media | `get_cash_flow` | Receipts (ventas) + cash_movements (gastos) = flujo neto del período |
+| 🟡 Media | `get_hourly_breakdown` | Ventas por hora del día — identificar picos operativos |
+| 🟡 Media | `get_category_breakdown` | Revenue por categoría en un período |
+| 🔵 Baja | Batch loading receipts | N+1 conocido: `WHERE receipt_id = ANY($1)` si consultas mensuales son lentas |
+| 🔵 Baja | Admin CLI (Bubble Tea) | `cmd/admin/` — bulk photo upload, estandarizar nombres |
+
+---
+
+## [2026-03-05] Sesión: Code audit + backlog de nuevas tools
+
+### Qué se hizo
+
+Audit completo del código de las 5 tools existentes (handlers, Cortex, DataReader, DB layer).
+Se identificaron bugs y se definió el backlog de nuevas tools para expansión futura.
+
+### Bug encontrado: `CalculateTopProducts` no filtra receipts cancelados
+
+`CalculateSalesMetrics` tiene el guard `if r.CancelledAt != nil { continue }`.
+`CalculateTopProducts` **NO tiene ese guard** — los line_items de receipts cancelados se suman
+al ranking de productos. La DB almacena cancelados con `cancelled_at` seteado y los retorna en
+`GetReceiptsByDateRange`. Fix trivial: agregar el mismo guard en el loop de `products.go`.
+
+### Design concerns (no bugs, pero relevantes para nuevas tools)
+
+1. **`CalculateStock` sin orden**: retorna items en orden de iteración de map (no determinístico).
+   Para nuevas tools tipo `get_low_stock` necesitamos ordenar explícitamente en Cortex.
+
+2. **`ProductSales` solo tiene `Quantity`, no revenue**: El struct de `CalculateTopProducts`
+   no expone `TotalMoney` por producto. Para `get_sales_velocity` y queries de "qué producto
+   genera más plata" vamos a necesitar agregar `Revenue float64` al struct `ProductSales`.
+
+3. **`DataReader.GetPaymentTypes` — nunca llamado**: Está en la interfaz y en el CachingReader
+   (pass-through) pero ningún handler lo usa. No es un bug, pero es dead interface surface.
+
+4. **`CalculateSupplierPayments` con filtro sigue populando `Unmatched`**: Cuando
+   `supplierFilter != ""`, los pagos no clasificados igual se agregan al slice `Unmatched`.
+   El LLM recibe ruido innecesario cuando pregunta por un proveedor específico.
+
+### Backlog de nuevas tools (para implementar en sesiones futuras)
+
+#### Sin nuevas tablas (solo receipts + inventory existentes)
+
+| Tool | Cortex function | Datos necesarios | Prioridad |
+|------|----------------|-----------------|-----------|
+| `get_sales_velocity` | `CalculateSalesVelocity` | receipts (line_items) | 🔴 Alta |
+| `get_reorder_suggestions` | `CalculateReorderSuggestions` | velocity + inventory_levels | 🔴 Alta |
+| `get_dead_stock` | (derived from velocity, 0 sales) | receipts + inventory | 🔴 Alta |
+| `get_cash_flow` | `CalculateCashFlow` | receipts + cash_movements | 🟡 Media |
+| `get_hourly_breakdown` | `CalculateHourlyBreakdown` | receipts (CreatedAt hour) | 🟡 Media |
+| `get_category_breakdown` | `CalculateCategoryBreakdown` | receipts + items + categories | 🟡 Media |
+| `compare_periods` | (calls existing functions twice) | receipts | 🟡 Media |
+| `get_employee_performance` | `CalculateEmployeePerformance` | receipts (EmployeeID) + employees | 🔵 Baja |
+| `get_refund_analysis` | `CalculateRefundAnalysis` | receipts (REFUND type) | 🔵 Baja |
+
+#### Con nuevas tablas (requieren schema additions)
+
+| Tool | Nueva tabla | Prioridad |
+|------|------------|-----------|
+| `get_debt_status` | `debts`, `debt_payments` | 🟡 Media |
+| `get_margins` | `purchase_prices` (FIFO) | 🔵 Baja |
+| `create_task` | `tasks` | 🔵 Baja |
+
+#### Notas de diseño para `get_sales_velocity`
+
+```
+Input: receipts (N días), inventory_levels, items
+Output: [{ item, units_per_day, current_stock, days_of_stock }]
+Key: days_of_stock = current_stock / units_per_day
+     units_per_day = total_qty_sold / N_dias
+Importante: usar net qty (SALE - REFUND), no skippear REFUND como hace CalculateTopProducts
+```
+
+### Estado al cierre
+
+| Módulo | Componente | Estado |
+|--------|------------|--------|
+| Loyverse API client | Compartido | ✅ Completo — 34 tests |
+| Config | Compartido | ✅ Completo |
+| LLM client (Groq/Gemini) | Aria | ✅ Completo |
+| Agent + tools | Aria | ✅ v3 + CachingReader |
+| Multi-turn memory | Aria | ✅ Completo |
+| Retry/Resilience | Aria | ✅ Completo |
+| Voice-to-text (Whisper) | Aria | ✅ Completo |
+| WhatsApp bot (pure Go) | Aria | ✅ Completo |
+| DB package (SQLite + PG) | Compartido | ✅ Completo — 18+18 tests |
+| Sync service | Compartido | ✅ Completo — 5 tests |
+| Cortex: todas las funciones | Cortex | ✅ Completo — 5 funciones puras |
+| CachingReader | Tools | ✅ Completo — 7 tests |
+| **Bug: cancelled en TopProducts** | **Cortex** | 🔴 **Pendiente fix** |
+| Admin CLI (Bubble Tea) | Aria | 🔴 No iniciado |
+| Loyverse write endpoints | Compartido | 🔴 No iniciado |
+| Web dashboard | Aria | 🔴 No iniciado (fase final) |
+
+### Próximos pasos
+
+| Prioridad | Tarea | Descripción |
+|-----------|-------|-------------|
+| 🔴 Alta | Fix cancelled en CalculateTopProducts | Agregar `if r.CancelledAt != nil { continue }` en `cortex/products.go` |
+| 🔴 Alta | `get_sales_velocity` | Nueva Cortex function + handler + registry entry |
+| 🔴 Alta | `get_reorder_suggestions` | Usa velocity + stock |
+| 🟡 Media | `get_cash_flow` | Receipts + cash_movements combinados |
+| 🟡 Media | `get_hourly_breakdown` | Ventas por hora del día |
+| 🟡 Media | `get_category_breakdown` | Revenue por categoría |
+
+---
+
 ## [2026-03-05] Sesión: Audit de capas + CachingReader para items/categories
 
 ### Qué se hizo

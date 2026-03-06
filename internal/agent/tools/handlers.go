@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"aria/internal/cortex"
 )
@@ -140,6 +141,91 @@ func (e *Executor) handleGetSupplierPayments(ctx context.Context, args map[strin
 		"pagos_por_proveedor": result.BySupplier,
 		"total":               result.GrandTotal,
 		"sin_clasificar":      unmatched,
+	}, nil
+}
+
+// ── get_sales_velocity ───────────────────────────────────────────────────────
+
+func (e *Executor) handleGetSalesVelocity(ctx context.Context, args map[string]any) (map[string]any, error) {
+	since, until, err := parseDateRange(args)
+	if err != nil {
+		return nil, err
+	}
+
+	receipts, err := e.reader.GetReceipts(ctx, since, until)
+	if err != nil {
+		return nil, fmt.Errorf("get receipts: %w", err)
+	}
+
+	inventory, err := e.reader.GetInventory(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get inventory: %w", err)
+	}
+
+	items, err := e.reader.GetItems(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get items: %w", err)
+	}
+
+	cats, err := e.reader.GetCategories(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get categories: %w", err)
+	}
+
+	result := cortex.CalculateSalesVelocity(receipts, inventory, items, cats, since, until,
+		cortex.SalesVelocityOptions{
+			CategoryFilter: stringArg(args, "category"),
+			Limit:          intArg(args, "limit", 10),
+		})
+
+	out := make([]map[string]any, len(result.Items))
+	for i, it := range result.Items {
+		entry := map[string]any{
+			"producto":      it.Name,
+			"categoria":     it.Category,
+			"unidades_dia":  math.Round(it.UnitsPerDay*10) / 10, // 1 decimal
+			"stock_actual":  it.CurrentStock,
+			"dias_de_stock": math.Round(it.DaysOfStock*10) / 10,
+		}
+		out[i] = entry
+	}
+	return map[string]any{
+		"periodo_dias": math.Round(result.PeriodDays),
+		"productos":    out,
+	}, nil
+}
+
+// ── get_cash_flow ────────────────────────────────────────────────────────────
+
+func (e *Executor) handleGetCashFlow(ctx context.Context, args map[string]any) (map[string]any, error) {
+	since, until, err := parseDateRange(args)
+	if err != nil {
+		return nil, err
+	}
+
+	receipts, err := e.reader.GetReceipts(ctx, since, until)
+	if err != nil {
+		return nil, fmt.Errorf("get receipts: %w", err)
+	}
+
+	shifts, err := e.reader.GetShifts(ctx, since, until)
+	if err != nil {
+		return nil, fmt.Errorf("get shifts: %w", err)
+	}
+
+	result := cortex.CalculateCashFlow(receipts, shifts)
+
+	periodDays := math.Round(until.Sub(since).Hours() / 24)
+	if periodDays < 1 {
+		periodDays = 1
+	}
+
+	return map[string]any{
+		"periodo_dias":  periodDays,
+		"ventas_netas":  result.NetSales,
+		"egresos_caja":  result.TotalPayOut,
+		"entradas_caja": result.TotalPayIn,
+		"flujo_neto":    result.NetCashFlow,
 	}, nil
 }
 

@@ -10,6 +10,8 @@ func AriaTools() []llm.ToolDef {
 		shiftExpensesTool(),
 		supplierPaymentsTool(),
 		stockTool(),
+		salesVelocityTool(),
+		cashFlowTool(),
 	}
 }
 
@@ -60,6 +62,32 @@ func supplierPaymentsTool() llm.ToolDef {
 			{Name: "start_date", Type: "string", Description: "Fecha de inicio en formato YYYY-MM-DD"},
 			{Name: "end_date", Type: "string", Description: "Fecha de fin en formato YYYY-MM-DD"},
 			{Name: "supplier_name", Type: "string", Description: "Nombre del proveedor para filtrar (opcional)"},
+		},
+		Required: []string{"start_date", "end_date"},
+	}
+}
+
+func salesVelocityTool() llm.ToolDef {
+	return llm.ToolDef{
+		Name:        "get_sales_velocity",
+		Description: "Calcula la velocidad de venta por producto (unidades/día) y los días de stock restante. Usar para: '¿cuándo se agota X?', '¿qué hay que pedir?', '¿qué productos no se están vendiendo?'. Retorna los productos ordenados por urgencia (menos días de stock primero). Los productos con stock pero sin ventas son dead stock (dias_de_stock=0).",
+		Parameters: []llm.ParamDef{
+			{Name: "start_date", Type: "string", Description: "Fecha de inicio del período de análisis en formato YYYY-MM-DD"},
+			{Name: "end_date", Type: "string", Description: "Fecha de fin del período de análisis en formato YYYY-MM-DD"},
+			{Name: "category", Type: "string", Description: "Nombre de la categoría para filtrar (opcional)"},
+			{Name: "limit", Type: "integer", Description: "Cantidad máxima de productos a retornar (default 20)"},
+		},
+		Required: []string{"start_date", "end_date"},
+	}
+}
+
+func cashFlowTool() llm.ToolDef {
+	return llm.ToolDef{
+		Name:        "get_cash_flow",
+		Description: "Calcula el flujo de caja del período: ventas netas (ingresos) menos egresos de caja (PAY_OUT: gastos, proveedores) más entradas extra (PAY_IN). Usar para: '¿cuánto entró y salió hoy?', '¿cuál es el balance del día/semana?', '¿cuánto quedó en caja?'.",
+		Parameters: []llm.ParamDef{
+			{Name: "start_date", Type: "string", Description: "Fecha de inicio en formato YYYY-MM-DD"},
+			{Name: "end_date", Type: "string", Description: "Fecha de fin en formato YYYY-MM-DD"},
 		},
 		Required: []string{"start_date", "end_date"},
 	}

@@ -40,6 +40,10 @@ func (e *Executor) Execute(ctx context.Context, name string, args map[string]any
 		return e.handleGetShiftExpenses(ctx, args)
 	case "get_supplier_payments":
 		return e.handleGetSupplierPayments(ctx, args)
+	case "get_sales_velocity":
+		return e.handleGetSalesVelocity(ctx, args)
+	case "get_cash_flow":
+		return e.handleGetCashFlow(ctx, args)
 	case "get_stock":
 		return e.handleGetStock(ctx, args)
 	default:
